@@ -39,6 +39,8 @@ func main() {
 	path := ""
 	if len(os.Args) == 2 {
 		path = os.Args[1]
+	} else {
+		path = datedUntitledPath(time.Now())
 	}
 	e, err := newEditor(path)
 	if err != nil {
@@ -70,12 +72,12 @@ func newEditor(path string) (*editor, error) {
 	if err := s.Init(); err != nil {
 		return nil, err
 	}
-	recovery := filepath.Join(os.TempDir(), "marko-untitled.md")
 	status := "Ctrl-T new table  Ctrl-S save  Ctrl-Q quit"
-	if path == "" {
-		status = "Untitled recovery: " + recovery
-	}
-	return &editor{screen: s, path: path, lines: lines, recovery: recovery, status: status, theme: selectedTheme()}, nil
+	return &editor{screen: s, path: path, lines: lines, status: status, theme: selectedTheme()}, nil
+}
+
+func datedUntitledPath(now time.Time) string {
+	return now.Format("20060102") + "_untitled.md"
 }
 
 func selectedTheme() theme {
@@ -374,9 +376,6 @@ func (e *editor) save() {
 		return
 	}
 	e.dirty = false
-	if e.recovery != "" {
-		_ = os.Remove(e.recovery)
-	}
 	e.status = "Saved " + e.path
 }
 
@@ -385,17 +384,8 @@ func (e *editor) autosave() {
 		return
 	}
 	if time.Since(e.lastEdit) >= 2*time.Second {
-		if e.path == "" {
-			if err := os.WriteFile(e.recovery, []byte(strings.Join(e.lines, "\n")), 0600); err != nil {
-				e.status = "Recovery autosave failed: " + err.Error()
-				return
-			}
-			e.dirty = false
-			e.status = "Recovery autosaved: " + e.recovery
-		} else {
-			e.save()
-			e.status = "Autosaved " + e.path
-		}
+		e.save()
+		e.status = "Autosaved " + e.path
 	}
 }
 

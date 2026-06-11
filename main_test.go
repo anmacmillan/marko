@@ -2,7 +2,6 @@ package main
 
 import (
 	"os"
-	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -113,20 +112,9 @@ func TestSavePromptAddsMarkdownExtension(t *testing.T) {
 	_ = os.Remove("note.md")
 }
 
-func TestUntitledAutosaveRecovery(t *testing.T) {
-	recovery := filepath.Join(t.TempDir(), "recovery.md")
-	e := &editor{
-		lines:    []string{"recover me"},
-		dirty:    true,
-		lastEdit: time.Now().Add(-3 * time.Second),
-		recovery: recovery,
-	}
-	e.autosave()
-	data, err := os.ReadFile(recovery)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != "recover me" {
-		t.Fatalf("recovery = %q", data)
+func TestDatedUntitledPath(t *testing.T) {
+	now := time.Date(2026, 12, 30, 9, 0, 0, 0, time.UTC)
+	if got, want := datedUntitledPath(now), "20261230_untitled.md"; got != want {
+		t.Fatalf("datedUntitledPath() = %q, want %q", got, want)
 	}
 }

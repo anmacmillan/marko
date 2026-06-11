@@ -36,14 +36,11 @@ marko
 marko document.md
 ```
 
-Running `marko` by itself opens an untitled document immediately. Write
-normally, then press `Ctrl-S` to choose a filename. Marko automatically adds
-`.md` when the name has no extension.
+Running `marko` by itself opens a dated untitled document in the current
+working directory, for example `20261230_untitled.md`.
 
 Named files are created automatically if they do not already exist.
-Documents autosave after two seconds without typing. Named documents save to
-their normal path. Untitled documents save a private recovery copy at
-`$TMPDIR/marko-untitled.md` until you choose a filename with `Ctrl-S`.
+Documents autosave to their normal path after two seconds without typing.
 
 ## Themes
 
@@ -64,7 +61,7 @@ Set `MARKO_THEME` in your shell profile to make a theme permanent.
 - `Ctrl-T`: create a two-column table at the cursor
 - `Tab`: insert spaces, or move to the next cell inside a Markdown table
 - `Enter` in a table: add a row
-- `Ctrl-S`: save; for an untitled document, choose its filename
+- `Ctrl-S`: save
 - `Ctrl-Q`: quit
 
 This is an early prototype. It does not yet support selection, clipboard,
