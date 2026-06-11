@@ -32,6 +32,7 @@ type editor struct {
 	selX, selY  int
 	mouseDown   bool
 	search      string
+	replace     string
 	lastAction  time.Time
 	focusMode   bool
 }
@@ -50,7 +51,7 @@ type theme struct {
 	text, heading1, heading2, heading3, table, quote, statusBG, statusFG tcell.Color
 }
 
-var themeNames = []string{"calm", "green", "mono"}
+var themeNames = []string{"calm", "green", "mono", "light"}
 
 func main() {
 	if len(os.Args) > 2 {
@@ -131,6 +132,8 @@ func themeByName(name string) theme {
 		return theme{tcell.ColorPaleGreen, tcell.ColorLightGreen, tcell.ColorGreen, tcell.ColorDarkSeaGreen, tcell.ColorPaleGreen, tcell.ColorGray, tcell.ColorDarkGreen, tcell.ColorWhite}
 	case "mono":
 		return theme{tcell.ColorSilver, tcell.ColorWhite, tcell.ColorWhite, tcell.ColorSilver, tcell.ColorSilver, tcell.ColorGray, tcell.ColorGray, tcell.ColorBlack}
+	case "light":
+		return theme{tcell.ColorBlack, tcell.ColorDarkBlue, tcell.ColorDarkGreen, tcell.ColorDarkGoldenrod, tcell.ColorDarkGreen, tcell.ColorDarkSlateGray, tcell.ColorLightGray, tcell.ColorBlack}
 	default:
 		return theme{tcell.ColorSilver, tcell.ColorLightSkyBlue, tcell.ColorLightGreen, tcell.ColorLightGoldenrodYellow, tcell.ColorPaleGreen, tcell.ColorGray, tcell.ColorDarkSlateGray, tcell.ColorWhite}
 	}
@@ -225,6 +228,18 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 	case tcell.KeyCtrlF:
 		e.prompt = "Find: "
 		e.promptValue = e.search
+	case tcell.KeyCtrlN:
+		e.findNext()
+	case tcell.KeyCtrlP:
+		e.findPrevious()
+	case tcell.KeyCtrlR:
+		if e.search == "" {
+			e.prompt = "Find: "
+			e.promptValue = ""
+		} else {
+			e.prompt = "Replace with: "
+			e.promptValue = e.replace
+		}
 	case tcell.KeyCtrlC:
 		e.copySelection()
 	case tcell.KeyCtrlX:
@@ -317,12 +332,18 @@ func (e *editor) promptKey(ev *tcell.EventKey) {
 	switch ev.Key() {
 	case tcell.KeyEsc:
 		e.prompt, e.promptValue = "", ""
-		e.status = "Save cancelled"
+		e.status = "Cancelled"
 	case tcell.KeyEnter:
 		if e.prompt == "Find: " {
 			e.search = e.promptValue
 			e.prompt, e.promptValue = "", ""
 			e.findNext()
+			return
+		}
+		if e.prompt == "Replace with: " {
+			e.replace = e.promptValue
+			e.prompt, e.promptValue = "", ""
+			e.replaceCurrent()
 			return
 		}
 		path := strings.TrimSpace(e.promptValue)
@@ -341,8 +362,21 @@ func (e *editor) promptKey(ev *tcell.EventKey) {
 		if len(r) > 0 {
 			e.promptValue = string(r[:len(r)-1])
 		}
+		if e.prompt == "Find: " {
+			e.search = e.promptValue
+		}
+	case tcell.KeyCtrlA:
+		if e.prompt == "Replace with: " {
+			e.replace = e.promptValue
+			e.prompt, e.promptValue = "", ""
+			e.replaceAll()
+		}
 	case tcell.KeyRune:
 		e.promptValue += string(ev.Rune())
+		if e.prompt == "Find: " {
+			e.search = e.promptValue
+			e.findFromStart()
+		}
 	}
 }
 
@@ -401,6 +435,84 @@ func (e *editor) findNext() {
 		}
 	}
 	e.status = "Not found: " + e.search
+}
+
+func (e *editor) findPrevious() {
+	if e.search == "" {
+		return
+	}
+	for offset := 0; offset < len(e.lines); offset++ {
+		y := (e.y - offset + len(e.lines)) % len(e.lines)
+		limit := runeLen(e.lines[y])
+		if offset == 0 {
+			limit = e.x
+		}
+		runes := []rune(e.lines[y])
+		index := strings.LastIndex(string(runes[:limit]), e.search)
+		if index >= 0 {
+			e.y, e.x = y, runeLen(string(runes[:index]))
+			e.status = "Found previous: " + e.search
+			return
+		}
+	}
+	e.status = "Not found: " + e.search
+}
+
+func (e *editor) findFromStart() {
+	if e.search == "" {
+		return
+	}
+	for y, line := range e.lines {
+		if index := strings.Index(line, e.search); index >= 0 {
+			e.y, e.x = y, runeLen(line[:index])
+			return
+		}
+	}
+}
+
+func (e *editor) currentMatch() (int, int, bool) {
+	if e.search == "" {
+		return 0, 0, false
+	}
+	runes := []rune(e.lines[e.y])
+	end := e.x + runeLen(e.search)
+	return e.x, end, end <= len(runes) && string(runes[e.x:end]) == e.search
+}
+
+func (e *editor) replaceCurrent() {
+	start, end, ok := e.currentMatch()
+	if !ok {
+		e.findNext()
+		start, end, ok = e.currentMatch()
+	}
+	if !ok {
+		return
+	}
+	e.checkpoint()
+	runes := []rune(e.lines[e.y])
+	e.lines[e.y] = string(runes[:start]) + e.replace + string(runes[end:])
+	e.x = start + runeLen(e.replace)
+	e.dirty = true
+	e.status = "Replaced current match"
+}
+
+func (e *editor) replaceAll() {
+	if e.search == "" {
+		return
+	}
+	count := 0
+	e.checkpoint()
+	for y, line := range e.lines {
+		count += strings.Count(line, e.search)
+		e.lines[y] = strings.ReplaceAll(line, e.search, e.replace)
+	}
+	if count == 0 {
+		e.undo = e.undo[:len(e.undo)-1]
+		e.status = "No matches to replace"
+		return
+	}
+	e.dirty = true
+	e.status = fmt.Sprintf("Replaced %d match(es)", count)
 }
 
 func (e *editor) beginKeyboardSelection(mod tcell.ModMask) {
@@ -781,9 +893,25 @@ func (e *editor) putSelected(row int, text string, style tcell.Style, width, y, 
 		s := style
 		if e.positionSelected(start+x, y) {
 			s = s.Reverse(true)
+		} else if e.positionMatchesSearch(start+x, y) {
+			s = s.Background(tcell.ColorDarkGoldenrod).Foreground(tcell.ColorWhite)
 		}
 		e.screen.SetContent(x, row, r, nil, s)
 	}
+}
+
+func (e *editor) positionMatchesSearch(x, y int) bool {
+	if e.search == "" {
+		return false
+	}
+	line := []rune(e.lines[y])
+	needle := []rune(e.search)
+	for start := 0; start+len(needle) <= len(line); start++ {
+		if runesEqualAt(line, start, needle) && x >= start && x < start+len(needle) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *editor) positionSelected(x, y int) bool {
@@ -862,7 +990,7 @@ func (e *editor) put(x, y int, text string, style tcell.Style, maxWidth int) {
 	}
 }
 
-func (e *editor) putInline(x, y int, text string, base tcell.Style, maxWidth int) {
+func (e *editor) putInline(x, screenY int, text string, base tcell.Style, maxWidth int) {
 	runes := []rune(text)
 	for i := 0; i < len(runes) && x < maxWidth; {
 		marker, styled, end := emphasisAt(runes, i)
@@ -871,13 +999,13 @@ func (e *editor) putInline(x, y int, text string, base tcell.Style, maxWidth int
 				if x >= maxWidth {
 					break
 				}
-				e.screen.SetContent(x, y, r, nil, styled(base))
+				e.screen.SetContent(x, screenY, r, nil, styled(base))
 				x++
 			}
 			i = end + marker
 			continue
 		}
-		e.screen.SetContent(x, y, runes[i], nil, base)
+		e.screen.SetContent(x, screenY, runes[i], nil, base)
 		x++
 		i++
 	}

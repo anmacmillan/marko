@@ -162,3 +162,30 @@ func TestSelectionText(t *testing.T) {
 		t.Fatalf("selectionText() = %q, want %q", got, want)
 	}
 }
+
+func TestFindPrevious(t *testing.T) {
+	e := &editor{lines: []string{"one two one"}, search: "one", x: 11}
+	e.findPrevious()
+	if e.x != 8 {
+		t.Fatalf("findPrevious x = %d, want 8", e.x)
+	}
+}
+
+func TestReplaceAll(t *testing.T) {
+	e := &editor{lines: []string{"old old", "old"}, search: "old", replace: "new"}
+	e.replaceAll()
+	want := []string{"new new", "new"}
+	if !reflect.DeepEqual(e.lines, want) {
+		t.Fatalf("replaceAll = %#v, want %#v", e.lines, want)
+	}
+}
+
+func TestSearchHighlightPosition(t *testing.T) {
+	e := &editor{lines: []string{"find this and this"}, search: "this"}
+	if !e.positionMatchesSearch(6, 0) || !e.positionMatchesSearch(15, 0) {
+		t.Fatal("expected both search matches to highlight")
+	}
+	if e.positionMatchesSearch(0, 0) {
+		t.Fatal("non-match highlighted")
+	}
+}

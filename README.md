@@ -45,12 +45,13 @@ Documents autosave to their normal path after two seconds without typing.
 
 ## Themes
 
-Marko includes three built-in themes:
+Marko includes four built-in themes:
 
 ```sh
 marko document.md                  # calm, the default
 MARKO_THEME=green marko document.md
 MARKO_THEME=mono marko document.md
+MARKO_THEME=light marko document.md
 ```
 
 Set `MARKO_THEME` in your shell profile to make a theme permanent.
@@ -64,7 +65,10 @@ for future launches.
 - `Ctrl-T`: create a two-column table at the cursor
 - `Ctrl-G`: cycle and remember the colour theme
 - `Ctrl-Z` / `Ctrl-Y`: undo / redo
-- `Ctrl-F`: find the next matching text
+- `Ctrl-F`: live search; matches highlight while typing
+- `Enter` / `Ctrl-N`: next search match
+- `Ctrl-P`: previous search match
+- `Ctrl-R`: replace current match; press `Ctrl-A` in the replacement prompt to replace all
 - Shift + arrow keys or mouse drag: select text
 - `Ctrl-C` / `Ctrl-X` / `Ctrl-V`: copy / cut / paste
 - `Tab`: insert spaces, or move to the next cell inside a Markdown table
