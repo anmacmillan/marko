@@ -27,7 +27,7 @@
       <text x="330" y="612">│ Confirm deadline  │ Sam   │ Pending  │</text>
     </g>
 
-    <text x="330" y="682" fill="#859289">Markdown remains plain text. Enter a heading or table to reveal its source.</text>
+    <text x="330" y="682" fill="#859289">Dynamically rendered in the editable buffer. Enter the table to reveal its Markdown source.</text>
   </g>
 
   <rect x="0" y="852" width="1440" height="48" rx="0" fill="#344047"/>

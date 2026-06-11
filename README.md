@@ -2,11 +2,18 @@
 
 **A calm, modeless Markdown editor for the terminal.**
 
-Marko combines Micro-style familiar editing with inline-rendered headings,
-emphasis, and tables. There is no preview pane, no modal editing, no notes
-database, and no workspace to manage. Your files remain ordinary Markdown.
+Marko combines Micro-style familiar editing with **dynamic inline Markdown
+rendering**. Headings, emphasis, and tables render cleanly inside the terminal;
+move into them and their editable Markdown source reappears instantly.
+
+There is no preview pane, no modal editing, no notes database, and no workspace
+to manage. Your files remain ordinary Markdown.
 
 ![Simulated Marko terminal screenshot](docs/marko-screenshot.svg)
+
+The table above is not a preview or a separate pane. Marko dynamically renders
+the Markdown table directly inside the editable terminal buffer. Enter the
+table and the original pipes and separator row reappear for editing.
 
 ## Why Marko?
 
@@ -15,8 +22,9 @@ a separate read-only viewer, or a powerful modal editor with a learning curve.
 Marko fills the smaller gap between them.
 
 - Type and navigate normally with arrow keys, mouse, selection, and clipboard
-- Read clean headings, emphasis, and aligned tables in the editable buffer
-- Enter a rendered structure to reveal its ordinary Markdown source
+- Read dynamically rendered headings, emphasis, and aligned tables directly in
+  the editable terminal buffer
+- Enter any rendered structure to reveal and edit its ordinary Markdown source
 - Write in a centered, word-wrapped, Goyo-style column
 - Autosave safely, detect external changes, and keep a recovery journal
 - Keep every document portable as a plain `.md` file
@@ -46,9 +54,12 @@ Press `F1` inside Marko for the complete shortcut overlay.
 - Four persistent themes: calm, green, mono, and light
 - Recent-file picker with `Ctrl-E`
 
-### Markdown without friction
+### Dynamic Markdown rendering
 
-- Rendered headings, bold, italic, strikethrough, and tables
+- Tables dynamically render as aligned terminal tables, then reveal their
+  Markdown pipes when entered
+- Headings, bold, italic, and strikethrough follow the same reveal-on-edit model
+- Everything happens inside the editable buffer, never in a preview pane
 - `Ctrl-T` creates a table
 - `Tab` moves through table cells
 - `Enter` adds a row; on an empty final row, it leaves the table
