@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -35,6 +37,9 @@ type editor struct {
 	replace     string
 	lastAction  time.Time
 	focusMode   bool
+	modTime     time.Time
+	conflict    bool
+	showHelp    bool
 }
 
 type snapshot struct {
@@ -62,7 +67,7 @@ func main() {
 	if len(os.Args) == 2 {
 		path = os.Args[1]
 	} else {
-		path = datedUntitledPath(time.Now())
+		path = uniqueUntitledPath(time.Now(), ".")
 	}
 	e, err := newEditor(path)
 	if err != nil {
@@ -82,6 +87,10 @@ func newEditor(path string) (*editor, error) {
 			return nil, err
 		}
 	}
+	var modTime time.Time
+	if info, err := os.Stat(path); err == nil {
+		modTime = info.ModTime()
+	}
 	text := strings.ReplaceAll(string(data), "\r\n", "\n")
 	lines := strings.Split(text, "\n")
 	if len(lines) == 0 {
@@ -98,11 +107,22 @@ func newEditor(path string) (*editor, error) {
 	s.EnablePaste()
 	status := "Ctrl-T new table  Ctrl-S save  Ctrl-Q quit"
 	themeName := selectedThemeName()
-	return &editor{screen: s, path: path, lines: lines, status: status, themeName: themeName, theme: themeByName(themeName), lastAction: time.Now()}, nil
+	return &editor{screen: s, path: path, lines: lines, status: status, themeName: themeName, theme: themeByName(themeName), lastAction: time.Now(), modTime: modTime}, nil
 }
 
 func datedUntitledPath(now time.Time) string {
 	return now.Format("20060102") + "_untitled.md"
+}
+
+func uniqueUntitledPath(now time.Time, dir string) string {
+	base := now.Format("20060102") + "_untitled"
+	path := filepath.Join(dir, base+".md")
+	for n := 2; ; n++ {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return path
+		}
+		path = filepath.Join(dir, base+"_"+strconv.Itoa(n)+".md")
+	}
 }
 
 func selectedThemeName() string {
@@ -213,7 +233,10 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		}
 		return true
 	case tcell.KeyCtrlS:
-		if e.path == "" {
+		if ev.Modifiers()&tcell.ModShift != 0 {
+			e.prompt = "Save as: "
+			e.promptValue = e.path
+		} else if e.path == "" {
 			e.prompt = "Save as: "
 			e.promptValue = "untitled.md"
 		} else {
@@ -245,7 +268,7 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 	case tcell.KeyCtrlX:
 		e.cutSelection()
 	case tcell.KeyCtrlV:
-		if data, err := exec.Command("pbpaste").Output(); err == nil {
+		if data, err := clipboardRead(); err == nil {
 			e.insertText(string(data))
 		} else {
 			e.screen.GetClipboard()
@@ -253,6 +276,12 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 	case tcell.KeyCtrlT:
 		e.checkpoint()
 		e.insertTable()
+	case tcell.KeyF1:
+		e.showHelp = !e.showHelp
+	case tcell.KeyCtrlO:
+		e.openLink()
+	case tcell.KeyCtrlSpace:
+		e.toggleCheckbox()
 	case tcell.KeyUp:
 		e.beginKeyboardSelection(ev.Modifiers())
 		e.moveVertical(-1)
@@ -355,6 +384,8 @@ func (e *editor) promptKey(ev *tcell.EventKey) {
 			path += ".md"
 		}
 		e.path = path
+		e.conflict = false
+		e.modTime = time.Time{}
 		e.prompt, e.promptValue = "", ""
 		e.save()
 	case tcell.KeyBackspace, tcell.KeyBackspace2:
@@ -548,11 +579,41 @@ func (e *editor) copySelection() {
 		e.status = "Nothing selected"
 		return
 	}
-	cmd := exec.Command("pbcopy")
-	cmd.Stdin = strings.NewReader(text)
-	_ = cmd.Run()
+	_ = clipboardWrite(text)
 	e.screen.SetClipboard([]byte(text))
 	e.status = "Copied selection"
+}
+
+func clipboardWrite(text string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("pbcopy")
+	case "windows":
+		cmd = exec.Command("clip")
+	default:
+		if _, err := exec.LookPath("wl-copy"); err == nil {
+			cmd = exec.Command("wl-copy")
+		} else {
+			cmd = exec.Command("xclip", "-selection", "clipboard")
+		}
+	}
+	cmd.Stdin = strings.NewReader(text)
+	return cmd.Run()
+}
+
+func clipboardRead() ([]byte, error) {
+	switch runtime.GOOS {
+	case "darwin":
+		return exec.Command("pbpaste").Output()
+	case "windows":
+		return exec.Command("powershell", "-NoProfile", "-Command", "Get-Clipboard").Output()
+	default:
+		if _, err := exec.LookPath("wl-paste"); err == nil {
+			return exec.Command("wl-paste", "--no-newline").Output()
+		}
+		return exec.Command("xclip", "-selection", "clipboard", "-o").Output()
+	}
 }
 
 func (e *editor) cutSelection() {
@@ -650,11 +711,78 @@ func (e *editor) enter() {
 	}
 	r := []rune(e.lines[e.y])
 	left, right := string(r[:e.x]), string(r[e.x:])
+	prefix := listPrefix(left)
 	e.lines[e.y] = left
-	e.lines = insertLine(e.lines, e.y+1, right)
+	e.lines = insertLine(e.lines, e.y+1, prefix+right)
 	e.y++
-	e.x = 0
+	e.x = runeLen(prefix)
 	e.dirty = true
+}
+
+func listPrefix(line string) string {
+	indent := line[:len(line)-len(strings.TrimLeft(line, " "))]
+	trimmed := strings.TrimSpace(line)
+	for _, marker := range []string{"- [ ] ", "- [x] ", "- [X] ", "- ", "* ", "+ "} {
+		if strings.HasPrefix(trimmed, marker) {
+			return indent + marker
+		}
+	}
+	digits := 0
+	for digits < len(trimmed) && trimmed[digits] >= '0' && trimmed[digits] <= '9' {
+		digits++
+	}
+	if digits > 0 && strings.HasPrefix(trimmed[digits:], ". ") {
+		n, _ := strconv.Atoi(trimmed[:digits])
+		return indent + strconv.Itoa(n+1) + ". "
+	}
+	return ""
+}
+
+func (e *editor) toggleCheckbox() {
+	line := e.lines[e.y]
+	for _, pair := range [][2]string{{"- [ ]", "- [x]"}, {"- [x]", "- [ ]"}, {"- [X]", "- [ ]"}} {
+		if index := strings.Index(line, pair[0]); index >= 0 {
+			e.checkpoint()
+			e.lines[e.y] = line[:index] + pair[1] + line[index+len(pair[0]):]
+			e.dirty = true
+			e.status = "Toggled checkbox"
+			return
+		}
+	}
+	e.status = "No checkbox on this line"
+}
+
+func (e *editor) openLink() {
+	line := e.lines[e.y]
+	url := ""
+	for _, word := range strings.Fields(line) {
+		if strings.HasPrefix(word, "http://") || strings.HasPrefix(word, "https://") {
+			url = strings.TrimRight(word, ".,;)")
+			break
+		}
+	}
+	if url == "" {
+		if open := strings.Index(line, "]("); open >= 0 {
+			if close := strings.Index(line[open+2:], ")"); close >= 0 {
+				url = line[open+2 : open+2+close]
+			}
+		}
+	}
+	if url == "" {
+		e.status = "No link on this line"
+		return
+	}
+	command, args := "xdg-open", []string{url}
+	if runtime.GOOS == "darwin" {
+		command = "open"
+	} else if runtime.GOOS == "windows" {
+		command, args = "rundll32", []string{"url.dll,FileProtocolHandler", url}
+	}
+	if err := exec.Command(command, args...).Start(); err != nil {
+		e.status = "Could not open link: " + err.Error()
+		return
+	}
+	e.status = "Opened " + url
 }
 
 func (e *editor) nextTableCell() bool {
@@ -743,6 +871,11 @@ func (e *editor) clampX() {
 }
 
 func (e *editor) save() {
+	if e.externalChange() {
+		e.conflict = true
+		e.status = "File changed outside Marko. Use Save As or reopen it."
+		return
+	}
 	text := strings.Join(e.lines, "\n")
 	if err := os.MkdirAll(filepath.Dir(e.path), 0755); err != nil {
 		e.status = err.Error()
@@ -753,7 +886,19 @@ func (e *editor) save() {
 		return
 	}
 	e.dirty = false
+	if info, err := os.Stat(e.path); err == nil {
+		e.modTime = info.ModTime()
+	}
+	e.conflict = false
 	e.status = "Saved " + e.path
+}
+
+func (e *editor) externalChange() bool {
+	if e.modTime.IsZero() {
+		return false
+	}
+	info, err := os.Stat(e.path)
+	return err == nil && !info.ModTime().Equal(e.modTime)
 }
 
 func (e *editor) autosave() {
@@ -801,6 +946,9 @@ func (e *editor) draw() {
 	if !e.focusMode {
 		e.put(0, h-1, status, tcell.StyleDefault.Background(e.theme.statusBG).Foreground(e.theme.statusFG), w)
 	}
+	if e.showHelp {
+		e.drawHelp(w, h)
+	}
 	if e.prompt != "" {
 		e.screen.ShowCursor(1+runeLen(e.prompt)+runeLen(e.promptValue), h-1)
 	} else {
@@ -808,6 +956,29 @@ func (e *editor) draw() {
 		e.screen.ShowCursor(e.x-vr.start, cursorRow-e.top)
 	}
 	e.screen.Show()
+}
+
+func (e *editor) drawHelp(w, h int) {
+	lines := []string{
+		" Marko help ",
+		"F1 close   Ctrl-S save   Ctrl-Shift-S save as   Ctrl-Q quit",
+		"Ctrl-F find   Ctrl-N/P next/previous   Ctrl-R replace",
+		"Ctrl-Z/Y undo/redo   Ctrl-C/X/V clipboard",
+		"Ctrl-T table   Ctrl-Space checkbox   Ctrl-O open link",
+		"Ctrl-G theme   Shift-arrows or mouse drag select",
+	}
+	width := 0
+	for _, line := range lines {
+		width = max(width, runeLen(line))
+	}
+	x, y := max(0, (w-width-4)/2), max(0, (h-len(lines)-2)/2)
+	box := tcell.StyleDefault.Background(e.theme.statusBG).Foreground(e.theme.statusFG)
+	for row := 0; row < len(lines)+2 && y+row < h; row++ {
+		e.put(x, y+row, strings.Repeat(" ", min(w-x, width+4)), box, w)
+	}
+	for row, line := range lines {
+		e.put(x+2, y+1+row, line, box, w)
+	}
 }
 
 func (e *editor) visualRows(width int) []visualRow {
@@ -818,9 +989,18 @@ func (e *editor) visualRows(width int) []visualRow {
 			rows = append(rows, visualRow{y: y})
 			continue
 		}
-		for start := 0; start < len(runes); start += width {
+		for start := 0; start < len(runes); {
 			end := min(len(runes), start+width)
+			if end < len(runes) {
+				for candidate := end; candidate > start+width/2; candidate-- {
+					if runes[candidate-1] == ' ' {
+						end = candidate
+						break
+					}
+				}
+			}
 			rows = append(rows, visualRow{y: y, start: start, text: string(runes[start:end])})
+			start = end
 		}
 	}
 	return rows

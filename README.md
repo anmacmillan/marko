@@ -38,10 +38,25 @@ marko document.md
 ```
 
 Running `marko` by itself opens a dated untitled document in the current
-working directory, for example `20261230_untitled.md`.
+working directory, for example `20261230_untitled.md`. Further new documents
+that day use `_2`, `_3`, and so on, so nothing is overwritten.
 
 Named files are created automatically if they do not already exist.
 Documents autosave to their normal path after two seconds without typing.
+If another program changes the file, Marko refuses to overwrite it and asks
+you to reopen it or use Save As.
+
+## Install
+
+Download the appropriate binary from
+[GitHub Releases](https://github.com/anmacmillan/marko/releases), rename it to
+`marko`, make it executable, and place it on your `PATH`.
+
+Or build from source:
+
+```sh
+go install github.com/alexandermacmillan/little-marco@latest
+```
 
 ## Themes
 
@@ -63,6 +78,7 @@ for future launches.
 - Arrow keys, Home, End, Page Up, Page Down: move
 - Type, Backspace, Delete, Enter: edit normally
 - `Ctrl-T`: create a two-column table at the cursor
+- `F1`: show or hide the shortcut help overlay
 - `Ctrl-G`: cycle and remember the colour theme
 - `Ctrl-Z` / `Ctrl-Y`: undo / redo
 - `Ctrl-F`: live search; matches highlight while typing
@@ -71,10 +87,18 @@ for future launches.
 - `Ctrl-R`: replace current match; press `Ctrl-A` in the replacement prompt to replace all
 - Shift + arrow keys or mouse drag: select text
 - `Ctrl-C` / `Ctrl-X` / `Ctrl-V`: copy / cut / paste
+- `Ctrl-Space`: toggle a checkbox on the current line
+- `Ctrl-O`: open a Markdown or web link on the current line
 - `Tab`: insert spaces, or move to the next cell inside a Markdown table
 - `Enter` in a table: add a row
+- `Enter` in a list: continue bullets, checkboxes, or numbered lists
 - `Ctrl-S`: save
+- `Ctrl-Shift-S`: Save As
 - `Ctrl-Q`: quit
+
+Prose wraps at word boundaries. Clipboard commands support macOS, Windows,
+Wayland (`wl-copy` / `wl-paste`), and X11 (`xclip`), with terminal clipboard
+fallback where supported.
 
 After five seconds without input, Marko enters focus mode: the status bar
 disappears and surrounding text becomes quieter. Any key or mouse action exits

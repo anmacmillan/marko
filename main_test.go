@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -119,6 +120,18 @@ func TestDatedUntitledPath(t *testing.T) {
 	}
 }
 
+func TestUniqueUntitledPath(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 12, 30, 9, 0, 0, 0, time.UTC)
+	first := filepath.Join(dir, "20261230_untitled.md")
+	if err := os.WriteFile(first, nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := uniqueUntitledPath(now, dir), filepath.Join(dir, "20261230_untitled_2.md"); got != want {
+		t.Fatalf("uniqueUntitledPath() = %q, want %q", got, want)
+	}
+}
+
 func TestThemeNamesAreValid(t *testing.T) {
 	for _, name := range themeNames {
 		if !validTheme(name) {
@@ -187,5 +200,43 @@ func TestSearchHighlightPosition(t *testing.T) {
 	}
 	if e.positionMatchesSearch(0, 0) {
 		t.Fatal("non-match highlighted")
+	}
+}
+
+func TestListPrefix(t *testing.T) {
+	tests := map[string]string{
+		"- item":       "- ",
+		"  - [ ] task": "  - [ ] ",
+		"9. item":      "10. ",
+		"plain":        "",
+	}
+	for input, want := range tests {
+		if got := listPrefix(input); got != want {
+			t.Fatalf("listPrefix(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestToggleCheckbox(t *testing.T) {
+	e := &editor{lines: []string{"- [ ] task"}}
+	e.toggleCheckbox()
+	if e.lines[0] != "- [x] task" {
+		t.Fatalf("toggleCheckbox = %q", e.lines[0])
+	}
+}
+
+func TestExternalChange(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "doc.md")
+	if err := os.WriteFile(path, []byte("one"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := os.Stat(path)
+	e := &editor{path: path, modTime: info.ModTime()}
+	time.Sleep(10 * time.Millisecond)
+	if err := os.WriteFile(path, []byte("two"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if !e.externalChange() {
+		t.Fatal("external change was not detected")
 	}
 }
