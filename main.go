@@ -328,14 +328,19 @@ func (e *editor) drawLine(row int, line string, current bool, width int) {
 		line = e.renderTableLine(y)
 		style = style.Foreground(tcell.ColorPaleGreen)
 	}
+	if level, text, ok := heading(line); ok && !current {
+		line = text
+		switch level {
+		case 1:
+			style = style.Bold(true).Underline(true).Foreground(tcell.ColorLightSkyBlue)
+		case 2:
+			style = style.Bold(true).Foreground(tcell.ColorLightGreen)
+		default:
+			style = style.Bold(true).Foreground(tcell.ColorLightGoldenrodYellow)
+		}
+	}
 	if !current {
 		switch {
-		case strings.HasPrefix(trimmed, "# "):
-			style = style.Bold(true).Foreground(tcell.ColorLightSkyBlue)
-		case strings.HasPrefix(trimmed, "## "):
-			style = style.Bold(true).Foreground(tcell.ColorLightGreen)
-		case strings.HasPrefix(trimmed, "### "):
-			style = style.Bold(true).Foreground(tcell.ColorLightGoldenrodYellow)
 		case strings.HasPrefix(trimmed, ">"):
 			style = style.Foreground(tcell.ColorGray)
 		case isSeparator(line):
@@ -345,6 +350,18 @@ func (e *editor) drawLine(row int, line string, current bool, width int) {
 		}
 	}
 	e.put(0, row, line, style, width)
+}
+
+func heading(line string) (int, string, bool) {
+	trimmed := strings.TrimLeft(line, " ")
+	level := 0
+	for level < len(trimmed) && level < 6 && trimmed[level] == '#' {
+		level++
+	}
+	if level == 0 || level >= len(trimmed) || trimmed[level] != ' ' {
+		return 0, line, false
+	}
+	return level, strings.TrimSpace(trimmed[level+1:]), true
 }
 
 func (e *editor) cursorInSameTable(y int) bool {

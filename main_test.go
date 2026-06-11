@@ -63,3 +63,13 @@ func TestRenderTableLine(t *testing.T) {
 		t.Fatalf("separator render = %q, want %q", got, want)
 	}
 }
+
+func TestHeading(t *testing.T) {
+	level, text, ok := heading("### Key documents")
+	if !ok || level != 3 || text != "Key documents" {
+		t.Fatalf("heading() = %d, %q, %v", level, text, ok)
+	}
+	if _, _, ok := heading("#not a heading"); ok {
+		t.Fatal("heading without separating space was accepted")
+	}
+}
