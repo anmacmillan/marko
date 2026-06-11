@@ -91,7 +91,7 @@ for future launches.
 - `Ctrl-Space`: toggle a checkbox on the current line
 - `Ctrl-O`: open a Markdown or web link on the current line
 - `Tab`: insert spaces, or move to the next cell inside a Markdown table
-- `Enter` in a table: add a row
+- `Enter` in a table: add a row; on an empty final row, leave the table
 - `Enter` in a list: continue bullets, checkboxes, or numbered lists
 - `Ctrl-S`: save
 - `Ctrl-Shift-S`: Save As

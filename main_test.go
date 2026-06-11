@@ -227,6 +227,26 @@ func TestToggleCheckbox(t *testing.T) {
 	}
 }
 
+func TestTableRowEmpty(t *testing.T) {
+	if !tableRowEmpty("|   |   |") {
+		t.Fatal("empty table row was not detected")
+	}
+	if tableRowEmpty("| value |   |") {
+		t.Fatal("non-empty table row was detected as empty")
+	}
+	if tableRowEmpty("| --- | --- |") {
+		t.Fatal("separator row was detected as empty")
+	}
+}
+
+func TestEnterLeavesEmptyFinalTableRow(t *testing.T) {
+	e := &editor{lines: []string{"| A | B |", "| --- | --- |", "|   |   |"}, y: 2, x: 2}
+	e.enter()
+	if e.y != 3 || len(e.lines) != 4 || e.lines[3] != "" {
+		t.Fatalf("enter() did not leave table: y=%d lines=%#v", e.y, e.lines)
+	}
+}
+
 func TestExternalChange(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "doc.md")
 	if err := os.WriteFile(path, []byte("one"), 0644); err != nil {

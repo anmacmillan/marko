@@ -812,6 +812,15 @@ func (e *editor) delete() {
 
 func (e *editor) enter() {
 	if e.inTable(e.y) {
+		_, end := e.tableBounds(e.y)
+		if e.y == end && tableRowEmpty(e.lines[e.y]) {
+			e.lines = insertLine(e.lines, e.y+1, "")
+			e.y++
+			e.x = 0
+			e.dirty = true
+			e.status = "Left table"
+			return
+		}
 		cells := splitTable(e.lines[e.y])
 		row := "| " + strings.Repeat(" | ", max(0, len(cells)-1)) + "|"
 		e.lines = insertLine(e.lines, e.y+1, row)
@@ -828,6 +837,18 @@ func (e *editor) enter() {
 	e.y++
 	e.x = runeLen(prefix)
 	e.dirty = true
+}
+
+func tableRowEmpty(line string) bool {
+	if isSeparator(line) {
+		return false
+	}
+	for _, cell := range splitTable(line) {
+		if strings.TrimSpace(cell) != "" {
+			return false
+		}
+	}
+	return true
 }
 
 func listPrefix(line string) string {
@@ -1213,7 +1234,7 @@ func (e *editor) putSelected(row int, text string, style tcell.Style, width, y, 
 		}
 		s := style
 		if e.positionSelected(start+x, y) {
-			s = s.Reverse(true)
+			s = s.Background(tcell.ColorDodgerBlue).Foreground(tcell.ColorWhite).Bold(true)
 		} else if e.positionMatchesSearch(start+x, y) {
 			s = s.Background(tcell.ColorDarkGoldenrod).Foreground(tcell.ColorWhite)
 		}
