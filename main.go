@@ -25,11 +25,14 @@ type editor struct {
 	lastEdit    time.Time
 	recovery    string
 	theme       theme
+	themeName   string
 }
 
 type theme struct {
 	text, heading1, heading2, heading3, table, quote, statusBG, statusFG tcell.Color
 }
+
+var themeNames = []string{"calm", "green", "mono"}
 
 func main() {
 	if len(os.Args) > 2 {
@@ -73,15 +76,37 @@ func newEditor(path string) (*editor, error) {
 		return nil, err
 	}
 	status := "Ctrl-T new table  Ctrl-S save  Ctrl-Q quit"
-	return &editor{screen: s, path: path, lines: lines, status: status, theme: selectedTheme()}, nil
+	themeName := selectedThemeName()
+	return &editor{screen: s, path: path, lines: lines, status: status, themeName: themeName, theme: themeByName(themeName)}, nil
 }
 
 func datedUntitledPath(now time.Time) string {
 	return now.Format("20060102") + "_untitled.md"
 }
 
-func selectedTheme() theme {
-	switch strings.ToLower(os.Getenv("MARKO_THEME")) {
+func selectedThemeName() string {
+	if name := strings.ToLower(os.Getenv("MARKO_THEME")); validTheme(name) {
+		return name
+	}
+	if data, err := os.ReadFile(themeConfigPath()); err == nil {
+		if name := strings.TrimSpace(strings.ToLower(string(data))); validTheme(name) {
+			return name
+		}
+	}
+	return "calm"
+}
+
+func validTheme(name string) bool {
+	for _, candidate := range themeNames {
+		if name == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func themeByName(name string) theme {
+	switch name {
 	case "green":
 		return theme{tcell.ColorPaleGreen, tcell.ColorLightGreen, tcell.ColorGreen, tcell.ColorDarkSeaGreen, tcell.ColorPaleGreen, tcell.ColorGray, tcell.ColorDarkGreen, tcell.ColorWhite}
 	case "mono":
@@ -89,6 +114,14 @@ func selectedTheme() theme {
 	default:
 		return theme{tcell.ColorSilver, tcell.ColorLightSkyBlue, tcell.ColorLightGreen, tcell.ColorLightGoldenrodYellow, tcell.ColorPaleGreen, tcell.ColorGray, tcell.ColorDarkSlateGray, tcell.ColorWhite}
 	}
+}
+
+func themeConfigPath() string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return filepath.Join(".", ".marko-theme")
+	}
+	return filepath.Join(dir, "marko", "theme")
 }
 
 func (e *editor) run() {
@@ -134,6 +167,8 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		} else {
 			e.save()
 		}
+	case tcell.KeyCtrlG:
+		e.cycleTheme()
 	case tcell.KeyCtrlT:
 		e.insertTable()
 	case tcell.KeyUp:
@@ -183,6 +218,23 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		e.lastEdit = time.Now()
 	}
 	return false
+}
+
+func (e *editor) cycleTheme() {
+	next := 0
+	for i, name := range themeNames {
+		if name == e.themeName {
+			next = (i + 1) % len(themeNames)
+			break
+		}
+	}
+	e.themeName = themeNames[next]
+	e.theme = themeByName(e.themeName)
+	path := themeConfigPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err == nil {
+		_ = os.WriteFile(path, []byte(e.themeName+"\n"), 0644)
+	}
+	e.status = "Theme: " + e.themeName
 }
 
 func (e *editor) promptKey(ev *tcell.EventKey) {

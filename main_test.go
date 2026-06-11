@@ -118,3 +118,15 @@ func TestDatedUntitledPath(t *testing.T) {
 		t.Fatalf("datedUntitledPath() = %q, want %q", got, want)
 	}
 }
+
+func TestThemeNamesAreValid(t *testing.T) {
+	for _, name := range themeNames {
+		if !validTheme(name) {
+			t.Fatalf("built-in theme %q is invalid", name)
+		}
+		_ = themeByName(name)
+	}
+	if validTheme("unknown") {
+		t.Fatal("unknown theme accepted")
+	}
+}

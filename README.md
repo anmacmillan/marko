@@ -53,12 +53,15 @@ MARKO_THEME=mono marko document.md
 ```
 
 Set `MARKO_THEME` in your shell profile to make a theme permanent.
+Press `Ctrl-G` inside Marko to cycle themes. The selected theme is remembered
+for future launches.
 
 ## Keys
 
 - Arrow keys, Home, End, Page Up, Page Down: move
 - Type, Backspace, Delete, Enter: edit normally
 - `Ctrl-T`: create a two-column table at the cursor
+- `Ctrl-G`: cycle and remember the colour theme
 - `Tab`: insert spaces, or move to the next cell inside a Markdown table
 - `Enter` in a table: add a row
 - `Ctrl-S`: save
