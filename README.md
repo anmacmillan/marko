@@ -89,12 +89,15 @@ settings.
 - `Ctrl-T`: create a two-column table at the cursor
 - `F1`: show or hide the shortcut help overlay
 - `Ctrl-E`: open one of the five most recently used Markdown files
+- `Ctrl-L`: reload the current file from disk
+- `Ctrl-D`: delete the current line
 - `Ctrl-G`: cycle and remember the colour theme
 - `Ctrl-Z` / `Ctrl-Y`: undo / redo
 - `Ctrl-F`: live search; matches highlight while typing
 - `Enter` / `Ctrl-N`: next search match
 - `Ctrl-P`: previous search match
 - `Ctrl-R`: replace current match; press `Ctrl-A` in the replacement prompt to replace all
+- `Ctrl-Shift-R`: rename the current file
 - Shift + arrow keys or mouse drag: select text
 - Double-click a word: select it
 - Triple-click a line: select it
@@ -116,3 +119,6 @@ fallback where supported.
 After five seconds without input, Marko enters focus mode: the status bar
 disappears and surrounding text becomes quieter. Any key or mouse action exits
 focus mode immediately.
+
+The footer includes the current working directory. Marko also writes a private
+recovery journal before autosaving and removes it after a successful save.

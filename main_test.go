@@ -347,3 +347,44 @@ func TestLightThemeHasWhiteBackground(t *testing.T) {
 		t.Fatalf("light background = %v, want white", got)
 	}
 }
+
+func TestDeleteLine(t *testing.T) {
+	e := &editor{lines: []string{"one", "two", "three"}, y: 1}
+	e.deleteLine()
+	want := []string{"one", "three"}
+	if !reflect.DeepEqual(e.lines, want) {
+		t.Fatalf("deleteLine = %#v, want %#v", e.lines, want)
+	}
+}
+
+func TestReloadFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "doc.md")
+	_ = os.WriteFile(path, []byte("new content"), 0644)
+	e := &editor{path: path, lines: []string{"old content"}, dirty: true}
+	e.reloadFile()
+	if e.lines[0] != "new content" || e.dirty {
+		t.Fatalf("reloadFile = %#v dirty=%v", e.lines, e.dirty)
+	}
+}
+
+func TestRenameFile(t *testing.T) {
+	dir := t.TempDir()
+	oldPath := filepath.Join(dir, "old.md")
+	newPath := filepath.Join(dir, "new.md")
+	_ = os.WriteFile(oldPath, []byte("content"), 0644)
+	e := &editor{path: oldPath, renameFrom: oldPath}
+	e.renameFile(newPath)
+	if e.path != newPath {
+		t.Fatalf("rename path = %q", e.path)
+	}
+	if _, err := os.Stat(newPath); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestJournalPathIsInsideConfig(t *testing.T) {
+	got := journalPath("/tmp/example.md")
+	if !strings.Contains(got, filepath.Join("marko", "recovery")) || !strings.HasSuffix(got, ".journal") {
+		t.Fatalf("journalPath = %q", got)
+	}
+}

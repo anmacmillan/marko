@@ -47,6 +47,7 @@ type editor struct {
 	showRecent  bool
 	recent      []string
 	recentIndex int
+	renameFrom  string
 }
 
 type snapshot struct {
@@ -361,6 +362,11 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		}
 	case tcell.KeyCtrlG:
 		e.cycleTheme()
+	case tcell.KeyCtrlL:
+		e.reloadFile()
+	case tcell.KeyCtrlD:
+		e.checkpoint()
+		e.deleteLine()
 	case tcell.KeyCtrlE:
 		e.recent = loadRecent()
 		e.recentIndex = 0
@@ -377,7 +383,11 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 	case tcell.KeyCtrlP:
 		e.findPrevious()
 	case tcell.KeyCtrlR:
-		if e.search == "" {
+		if ev.Modifiers()&tcell.ModShift != 0 {
+			e.prompt = "Rename to: "
+			e.promptValue = e.path
+			e.renameFrom = e.path
+		} else if e.search == "" {
 			e.prompt = "Find: "
 			e.promptValue = ""
 		} else {
@@ -556,6 +566,11 @@ func (e *editor) promptKey(ev *tcell.EventKey) {
 			e.replace = e.promptValue
 			e.prompt, e.promptValue = "", ""
 			e.replaceCurrent()
+			return
+		}
+		if e.prompt == "Rename to: " {
+			e.renameFile(e.promptValue)
+			e.prompt, e.promptValue = "", ""
 			return
 		}
 		path := strings.TrimSpace(e.promptValue)
@@ -1095,6 +1110,61 @@ func (e *editor) save() {
 	}
 	e.conflict = false
 	e.status = "Saved " + e.path
+	_ = os.Remove(journalPath(e.path))
+}
+
+func (e *editor) reloadFile() {
+	data, err := os.ReadFile(e.path)
+	if err != nil {
+		e.status = "Reload failed: " + err.Error()
+		return
+	}
+	e.checkpoint()
+	e.lines = strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+	e.x, e.y, e.top = 0, 0, 0
+	e.dirty, e.conflict = false, false
+	if info, err := os.Stat(e.path); err == nil {
+		e.modTime = info.ModTime()
+	}
+	e.status = "Reloaded " + e.path
+}
+
+func (e *editor) deleteLine() {
+	if len(e.lines) == 1 {
+		e.lines[0], e.x, e.y = "", 0, 0
+	} else {
+		e.lines = append(e.lines[:e.y], e.lines[e.y+1:]...)
+		e.y = min(e.y, len(e.lines)-1)
+		e.clampX()
+	}
+	e.dirty = true
+	e.status = "Deleted line"
+}
+
+func (e *editor) renameFile(path string) {
+	path = strings.TrimSpace(path)
+	if filepath.Ext(path) == "" {
+		path += ".md"
+	}
+	if err := os.Rename(e.renameFrom, path); err != nil {
+		e.status = "Rename failed: " + err.Error()
+		return
+	}
+	e.path, e.renameFrom = path, ""
+	if info, err := os.Stat(e.path); err == nil {
+		e.modTime = info.ModTime()
+	}
+	e.rememberRecent(path)
+	e.status = "Renamed to " + path
+}
+
+func journalPath(path string) string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		dir = "."
+	}
+	name := strings.NewReplacer("/", "_", "\\", "_", ":", "_").Replace(path)
+	return filepath.Join(dir, "marko", "recovery", name+".journal")
 }
 
 func (e *editor) externalChange() bool {
@@ -1110,6 +1180,10 @@ func (e *editor) autosave() {
 		return
 	}
 	if time.Since(e.lastEdit) >= 2*time.Second {
+		journal := journalPath(e.path)
+		if os.MkdirAll(filepath.Dir(journal), 0700) == nil {
+			_ = os.WriteFile(journal, []byte(strings.Join(e.lines, "\n")), 0600)
+		}
 		e.save()
 		e.status = "Autosaved " + e.path
 	}
@@ -1148,7 +1222,8 @@ func (e *editor) draw() {
 	if e.dirty {
 		mark = " *"
 	}
-	status := fmt.Sprintf(" %s%s  Ln %d, Col %d  %s", name, mark, e.y+1, e.x+1, e.status)
+	cwd, _ := os.Getwd()
+	status := fmt.Sprintf(" %s%s  Ln %d, Col %d  %s  %s", name, mark, e.y+1, e.x+1, cwd, e.status)
 	if e.prompt != "" {
 		status = " " + e.prompt + e.promptValue
 	}
@@ -1261,7 +1336,7 @@ func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width
 	}
 	style := tcell.StyleDefault.Foreground(e.theme.text).Background(e.theme.background)
 	if e.focusMode && !current {
-		style = style.Foreground(tcell.ColorGray)
+		style = style.Dim(true)
 	}
 	e.putSelected(left, row, vr.text, style, width, vr.y, vr.start)
 }
@@ -1269,7 +1344,7 @@ func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width
 func (e *editor) drawLine(left, row, y int, line string, current bool, width int) {
 	style := tcell.StyleDefault.Foreground(e.theme.text).Background(e.theme.background)
 	if e.focusMode && !current {
-		style = style.Foreground(tcell.ColorGray)
+		style = style.Dim(true)
 	}
 	trimmed := strings.TrimSpace(line)
 	if e.inTable(y) && !e.cursorInSameTable(y) {
