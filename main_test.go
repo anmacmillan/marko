@@ -1,9 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -238,5 +240,48 @@ func TestExternalChange(t *testing.T) {
 	}
 	if !e.externalChange() {
 		t.Fatal("external change was not detected")
+	}
+}
+
+func TestLoadRecentRemovesMissingAndLimitsFive(t *testing.T) {
+	oldConfig := os.Getenv("XDG_CONFIG_HOME")
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	defer os.Setenv("XDG_CONFIG_HOME", oldConfig)
+
+	var paths []string
+	for i := 0; i < 6; i++ {
+		path := filepath.Join(dir, fmt.Sprintf("%d.md", i))
+		if err := os.WriteFile(path, nil, 0644); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, path)
+	}
+	paths = append([]string{filepath.Join(dir, "missing.md")}, paths...)
+	if err := os.MkdirAll(filepath.Dir(recentConfigPath()), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(recentConfigPath(), []byte(strings.Join(paths, "\n")), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got := loadRecent()
+	if len(got) != 5 || got[0] != paths[1] {
+		t.Fatalf("loadRecent() = %#v", got)
+	}
+}
+
+func TestRememberRecentMovesFileToFront(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	first := filepath.Join(dir, "first.md")
+	second := filepath.Join(dir, "second.md")
+	_ = os.WriteFile(first, nil, 0644)
+	_ = os.WriteFile(second, nil, 0644)
+	e := &editor{}
+	e.rememberRecent(first)
+	e.rememberRecent(second)
+	got := loadRecent()
+	if len(got) != 2 || got[0] != second || got[1] != first {
+		t.Fatalf("recent ordering = %#v", got)
 	}
 }

@@ -40,6 +40,9 @@ type editor struct {
 	modTime     time.Time
 	conflict    bool
 	showHelp    bool
+	showRecent  bool
+	recent      []string
+	recentIndex int
 }
 
 type snapshot struct {
@@ -107,7 +110,9 @@ func newEditor(path string) (*editor, error) {
 	s.EnablePaste()
 	status := "Ctrl-T new table  Ctrl-S save  Ctrl-Q quit"
 	themeName := selectedThemeName()
-	return &editor{screen: s, path: path, lines: lines, status: status, themeName: themeName, theme: themeByName(themeName), lastAction: time.Now(), modTime: modTime}, nil
+	e := &editor{screen: s, path: path, lines: lines, status: status, themeName: themeName, theme: themeByName(themeName), lastAction: time.Now(), modTime: modTime}
+	e.rememberRecent(path)
+	return e, nil
 }
 
 func datedUntitledPath(now time.Time) string {
@@ -167,6 +172,53 @@ func themeConfigPath() string {
 	return filepath.Join(dir, "marko", "theme")
 }
 
+func recentConfigPath() string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return filepath.Join(".", ".marko-recent")
+	}
+	return filepath.Join(dir, "marko", "recent")
+}
+
+func loadRecent() []string {
+	data, err := os.ReadFile(recentConfigPath())
+	if err != nil {
+		return nil
+	}
+	var recent []string
+	for _, path := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if path != "" {
+			if _, err := os.Stat(path); err == nil {
+				recent = append(recent, path)
+			}
+		}
+		if len(recent) == 5 {
+			break
+		}
+	}
+	return recent
+}
+
+func (e *editor) rememberRecent(path string) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return
+	}
+	recent := []string{abs}
+	for _, existing := range loadRecent() {
+		if existing != abs {
+			recent = append(recent, existing)
+		}
+		if len(recent) == 5 {
+			break
+		}
+	}
+	config := recentConfigPath()
+	if os.MkdirAll(filepath.Dir(config), 0755) == nil {
+		_ = os.WriteFile(config, []byte(strings.Join(recent, "\n")+"\n"), 0644)
+	}
+}
+
 func (e *editor) run() {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
@@ -220,6 +272,10 @@ func (e *editor) mouse(ev *tcell.EventMouse) {
 }
 
 func (e *editor) key(ev *tcell.EventKey) bool {
+	if e.showRecent {
+		e.recentKey(ev)
+		return false
+	}
 	if e.prompt != "" {
 		e.promptKey(ev)
 		return false
@@ -244,6 +300,10 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		}
 	case tcell.KeyCtrlG:
 		e.cycleTheme()
+	case tcell.KeyCtrlE:
+		e.recent = loadRecent()
+		e.recentIndex = 0
+		e.showRecent = true
 	case tcell.KeyCtrlZ:
 		e.undoEdit()
 	case tcell.KeyCtrlY:
@@ -338,6 +398,57 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		e.lastEdit = time.Now()
 	}
 	return false
+}
+
+func (e *editor) recentKey(ev *tcell.EventKey) {
+	switch ev.Key() {
+	case tcell.KeyEsc, tcell.KeyCtrlE:
+		e.showRecent = false
+	case tcell.KeyUp:
+		if e.recentIndex > 0 {
+			e.recentIndex--
+		}
+	case tcell.KeyDown:
+		if e.recentIndex+1 < len(e.recent) {
+			e.recentIndex++
+		}
+	case tcell.KeyEnter:
+		if len(e.recent) == 0 {
+			e.showRecent = false
+			return
+		}
+		e.openFile(e.recent[e.recentIndex])
+	}
+}
+
+func (e *editor) openFile(path string) {
+	if e.dirty {
+		e.save()
+		if e.dirty {
+			e.status = "Could not switch: current file was not saved"
+			e.showRecent = false
+			return
+		}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		e.status = "Could not open: " + err.Error()
+		e.showRecent = false
+		return
+	}
+	e.path = path
+	e.lines = strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+	if len(e.lines) == 0 {
+		e.lines = []string{""}
+	}
+	e.x, e.y, e.top = 0, 0, 0
+	e.undo, e.redo = nil, nil
+	e.dirty, e.selecting, e.conflict, e.showRecent = false, false, false, false
+	if info, err := os.Stat(path); err == nil {
+		e.modTime = info.ModTime()
+	}
+	e.rememberRecent(path)
+	e.status = "Opened " + path
 }
 
 func (e *editor) cycleTheme() {
@@ -949,6 +1060,9 @@ func (e *editor) draw() {
 	if e.showHelp {
 		e.drawHelp(w, h)
 	}
+	if e.showRecent {
+		e.drawRecent(w, h)
+	}
 	if e.prompt != "" {
 		e.screen.ShowCursor(1+runeLen(e.prompt)+runeLen(e.promptValue), h-1)
 	} else {
@@ -965,7 +1079,7 @@ func (e *editor) drawHelp(w, h int) {
 		"Ctrl-F find   Ctrl-N/P next/previous   Ctrl-R replace",
 		"Ctrl-Z/Y undo/redo   Ctrl-C/X/V clipboard",
 		"Ctrl-T table   Ctrl-Space checkbox   Ctrl-O open link",
-		"Ctrl-G theme   Shift-arrows or mouse drag select",
+		"Ctrl-E recent files   Ctrl-G theme   Shift-arrows or mouse drag select",
 	}
 	width := 0
 	for _, line := range lines {
@@ -978,6 +1092,33 @@ func (e *editor) drawHelp(w, h int) {
 	}
 	for row, line := range lines {
 		e.put(x+2, y+1+row, line, box, w)
+	}
+}
+
+func (e *editor) drawRecent(w, h int) {
+	lines := []string{" Recent Markdown files "}
+	for i, path := range e.recent {
+		prefix := "  "
+		if i == e.recentIndex {
+			prefix = "> "
+		}
+		lines = append(lines, prefix+path)
+	}
+	if len(e.recent) == 0 {
+		lines = append(lines, "  No recent files")
+	}
+	lines = append(lines, " Up/Down select   Enter open   Esc cancel ")
+	width := 0
+	for _, line := range lines {
+		width = max(width, min(runeLen(line), max(20, w-6)))
+	}
+	x, y := max(0, (w-width-4)/2), max(0, (h-len(lines)-2)/2)
+	box := tcell.StyleDefault.Background(e.theme.statusBG).Foreground(e.theme.statusFG)
+	for row := 0; row < len(lines)+2 && y+row < h; row++ {
+		e.put(x, y+row, strings.Repeat(" ", min(w-x, width+4)), box, w)
+	}
+	for row, line := range lines {
+		e.put(x+2, y+1+row, line, box, min(w, x+2+width))
 	}
 }
 

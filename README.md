@@ -79,6 +79,7 @@ for future launches.
 - Type, Backspace, Delete, Enter: edit normally
 - `Ctrl-T`: create a two-column table at the cursor
 - `F1`: show or hide the shortcut help overlay
+- `Ctrl-E`: open one of the five most recently used Markdown files
 - `Ctrl-G`: cycle and remember the colour theme
 - `Ctrl-Z` / `Ctrl-Y`: undo / redo
 - `Ctrl-F`: live search; matches highlight while typing
