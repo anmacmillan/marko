@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v2"
@@ -21,6 +22,13 @@ type editor struct {
 	preferredX  int
 	prompt      string
 	promptValue string
+	lastEdit    time.Time
+	recovery    string
+	theme       theme
+}
+
+type theme struct {
+	text, heading1, heading2, heading3, table, quote, statusBG, statusFG tcell.Color
 }
 
 func main() {
@@ -62,15 +70,40 @@ func newEditor(path string) (*editor, error) {
 	if err := s.Init(); err != nil {
 		return nil, err
 	}
-	return &editor{screen: s, path: path, lines: lines, status: "Ctrl-T new table  Ctrl-S save  Ctrl-Q quit"}, nil
+	recovery := filepath.Join(os.TempDir(), "marko-untitled.md")
+	status := "Ctrl-T new table  Ctrl-S save  Ctrl-Q quit"
+	if path == "" {
+		status = "Untitled recovery: " + recovery
+	}
+	return &editor{screen: s, path: path, lines: lines, recovery: recovery, status: status, theme: selectedTheme()}, nil
+}
+
+func selectedTheme() theme {
+	switch strings.ToLower(os.Getenv("MARKO_THEME")) {
+	case "green":
+		return theme{tcell.ColorPaleGreen, tcell.ColorLightGreen, tcell.ColorGreen, tcell.ColorDarkSeaGreen, tcell.ColorPaleGreen, tcell.ColorGray, tcell.ColorDarkGreen, tcell.ColorWhite}
+	case "mono":
+		return theme{tcell.ColorSilver, tcell.ColorWhite, tcell.ColorWhite, tcell.ColorSilver, tcell.ColorSilver, tcell.ColorGray, tcell.ColorGray, tcell.ColorBlack}
+	default:
+		return theme{tcell.ColorSilver, tcell.ColorLightSkyBlue, tcell.ColorLightGreen, tcell.ColorLightGoldenrodYellow, tcell.ColorPaleGreen, tcell.ColorGray, tcell.ColorDarkSlateGray, tcell.ColorWhite}
+	}
 }
 
 func (e *editor) run() {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	go func() {
+		for range ticker.C {
+			e.screen.PostEvent(tcell.NewEventInterrupt(nil))
+		}
+	}()
 	for {
 		e.draw()
 		switch ev := e.screen.PollEvent().(type) {
 		case *tcell.EventResize:
 			e.screen.Sync()
+		case *tcell.EventInterrupt:
+			e.autosave()
 		case *tcell.EventKey:
 			if e.key(ev) {
 				return
@@ -144,6 +177,9 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 	}
 	e.confirmQuit = false
 	e.preferredX = e.x
+	if e.dirty {
+		e.lastEdit = time.Now()
+	}
 	return false
 }
 
@@ -338,7 +374,29 @@ func (e *editor) save() {
 		return
 	}
 	e.dirty = false
+	if e.recovery != "" {
+		_ = os.Remove(e.recovery)
+	}
 	e.status = "Saved " + e.path
+}
+
+func (e *editor) autosave() {
+	if !e.dirty || e.prompt != "" || e.lastEdit.IsZero() {
+		return
+	}
+	if time.Since(e.lastEdit) >= 2*time.Second {
+		if e.path == "" {
+			if err := os.WriteFile(e.recovery, []byte(strings.Join(e.lines, "\n")), 0600); err != nil {
+				e.status = "Recovery autosave failed: " + err.Error()
+				return
+			}
+			e.dirty = false
+			e.status = "Recovery autosaved: " + e.recovery
+		} else {
+			e.save()
+			e.status = "Autosaved " + e.path
+		}
+	}
 }
 
 func (e *editor) draw() {
@@ -367,7 +425,7 @@ func (e *editor) draw() {
 	if e.prompt != "" {
 		status = " " + e.prompt + e.promptValue
 	}
-	e.put(0, h-1, status, tcell.StyleDefault.Background(tcell.ColorDarkSlateGray).Foreground(tcell.ColorWhite), w)
+	e.put(0, h-1, status, tcell.StyleDefault.Background(e.theme.statusBG).Foreground(e.theme.statusFG), w)
 	if e.prompt != "" {
 		e.screen.ShowCursor(1+runeLen(e.prompt)+runeLen(e.promptValue), h-1)
 	} else {
@@ -377,32 +435,32 @@ func (e *editor) draw() {
 }
 
 func (e *editor) drawLine(row int, line string, current bool, width int) {
-	style := tcell.StyleDefault.Foreground(tcell.ColorSilver)
+	style := tcell.StyleDefault.Foreground(e.theme.text)
 	trimmed := strings.TrimSpace(line)
 	y := row + e.top
 	if e.inTable(y) && !e.cursorInSameTable(y) {
 		line = e.renderTableLine(y)
-		style = style.Foreground(tcell.ColorPaleGreen)
+		style = style.Foreground(e.theme.table)
 	}
 	if level, text, ok := heading(line); ok && !current {
 		line = text
 		switch level {
 		case 1:
-			style = style.Bold(true).Underline(true).Foreground(tcell.ColorLightSkyBlue)
+			style = style.Bold(true).Underline(true).Foreground(e.theme.heading1)
 		case 2:
-			style = style.Bold(true).Foreground(tcell.ColorLightGreen)
+			style = style.Bold(true).Foreground(e.theme.heading2)
 		default:
-			style = style.Bold(true).Foreground(tcell.ColorLightGoldenrodYellow)
+			style = style.Bold(true).Foreground(e.theme.heading3)
 		}
 	}
 	if !current {
 		switch {
 		case strings.HasPrefix(trimmed, ">"):
-			style = style.Foreground(tcell.ColorGray)
+			style = style.Foreground(e.theme.quote)
 		case isSeparator(line):
 			style = style.Foreground(tcell.ColorDarkCyan)
 		case e.inTable(y):
-			style = style.Foreground(tcell.ColorPaleGreen)
+			style = style.Foreground(e.theme.table)
 		}
 	}
 	if current {

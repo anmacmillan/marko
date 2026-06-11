@@ -2,8 +2,10 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 )
@@ -109,4 +111,22 @@ func TestSavePromptAddsMarkdownExtension(t *testing.T) {
 		t.Fatalf("path = %q, want note.md", e.path)
 	}
 	_ = os.Remove("note.md")
+}
+
+func TestUntitledAutosaveRecovery(t *testing.T) {
+	recovery := filepath.Join(t.TempDir(), "recovery.md")
+	e := &editor{
+		lines:    []string{"recover me"},
+		dirty:    true,
+		lastEdit: time.Now().Add(-3 * time.Second),
+		recovery: recovery,
+	}
+	e.autosave()
+	data, err := os.ReadFile(recovery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "recover me" {
+		t.Fatalf("recovery = %q", data)
+	}
 }
