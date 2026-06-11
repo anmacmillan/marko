@@ -349,7 +349,11 @@ func (e *editor) drawLine(row int, line string, current bool, width int) {
 			style = style.Foreground(tcell.ColorPaleGreen)
 		}
 	}
-	e.put(0, row, line, style, width)
+	if current {
+		e.put(0, row, line, style, width)
+	} else {
+		e.putInline(0, row, line, style, width)
+	}
 }
 
 func heading(line string) (int, string, bool) {
@@ -415,6 +419,65 @@ func (e *editor) put(x, y int, text string, style tcell.Style, maxWidth int) {
 		e.screen.SetContent(x, y, r, nil, style)
 		x++
 	}
+}
+
+func (e *editor) putInline(x, y int, text string, base tcell.Style, maxWidth int) {
+	runes := []rune(text)
+	for i := 0; i < len(runes) && x < maxWidth; {
+		marker, styled, end := emphasisAt(runes, i)
+		if marker > 0 {
+			for _, r := range runes[i+marker : end] {
+				if x >= maxWidth {
+					break
+				}
+				e.screen.SetContent(x, y, r, nil, styled(base))
+				x++
+			}
+			i = end + marker
+			continue
+		}
+		e.screen.SetContent(x, y, runes[i], nil, base)
+		x++
+		i++
+	}
+}
+
+func emphasisAt(runes []rune, start int) (int, func(tcell.Style) tcell.Style, int) {
+	type markerStyle struct {
+		marker string
+		style  func(tcell.Style) tcell.Style
+	}
+	markers := []markerStyle{
+		{"**", func(s tcell.Style) tcell.Style { return s.Bold(true) }},
+		{"__", func(s tcell.Style) tcell.Style { return s.Bold(true) }},
+		{"~~", func(s tcell.Style) tcell.Style { return s.StrikeThrough(true) }},
+		{"*", func(s tcell.Style) tcell.Style { return s.Italic(true) }},
+		{"_", func(s tcell.Style) tcell.Style { return s.Italic(true) }},
+	}
+	for _, candidate := range markers {
+		marker := []rune(candidate.marker)
+		if !runesEqualAt(runes, start, marker) {
+			continue
+		}
+		for end := start + len(marker) + 1; end+len(marker) <= len(runes); end++ {
+			if runesEqualAt(runes, end, marker) {
+				return len(marker), candidate.style, end
+			}
+		}
+	}
+	return 0, nil, 0
+}
+
+func runesEqualAt(haystack []rune, start int, needle []rune) bool {
+	if start < 0 || start+len(needle) > len(haystack) {
+		return false
+	}
+	for i := range needle {
+		if haystack[start+i] != needle[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func splitTable(line string) []string {

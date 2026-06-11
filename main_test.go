@@ -3,6 +3,8 @@ package main
 import (
 	"reflect"
 	"testing"
+
+	"github.com/gdamore/tcell/v2"
 )
 
 func TestSplitTable(t *testing.T) {
@@ -71,5 +73,30 @@ func TestHeading(t *testing.T) {
 	}
 	if _, _, ok := heading("#not a heading"); ok {
 		t.Fatal("heading without separating space was accepted")
+	}
+}
+
+func TestEmphasisAt(t *testing.T) {
+	tests := []struct {
+		text       string
+		markerSize int
+		end        int
+	}{
+		{"**bold**", 2, 6},
+		{"*italic*", 1, 7},
+		{"~~strike~~", 2, 8},
+		{"plain", 0, 0},
+	}
+	for _, test := range tests {
+		size, style, end := emphasisAt([]rune(test.text), 0)
+		if size != test.markerSize || end != test.end {
+			t.Fatalf("emphasisAt(%q) = %d, %d; want %d, %d", test.text, size, end, test.markerSize, test.end)
+		}
+		if size > 0 && style == nil {
+			t.Fatalf("emphasisAt(%q) returned no style", test.text)
+		}
+		if style != nil {
+			_ = style(tcell.StyleDefault)
+		}
 	}
 }
