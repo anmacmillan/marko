@@ -17,6 +17,7 @@ value in everyday notes and documents:
 - familiar, low-friction text editing
 - visually distinct headings
 - quick table creation and pleasant table editing
+- aligned, rendered tables that reveal their Markdown source when entered
 - ordinary `.md` files that work everywhere
 
 Marko is not intended to become an IDE, knowledge-management system, or

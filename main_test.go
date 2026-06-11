@@ -45,3 +45,21 @@ func TestInsertTable(t *testing.T) {
 		t.Fatalf("cursor X = %d, want 9", e.x)
 	}
 }
+
+func TestRenderTableLine(t *testing.T) {
+	e := &editor{
+		lines: []string{
+			"| Name | Role |",
+			"| --- | --- |",
+			"| Alex | Barrister |",
+			"",
+		},
+		y: 3,
+	}
+	if got, want := e.renderTableLine(0), "│ Name │ Role      │"; got != want {
+		t.Fatalf("header render = %q, want %q", got, want)
+	}
+	if got, want := e.renderTableLine(1), "├──────┼───────────┤"; got != want {
+		t.Fatalf("separator render = %q, want %q", got, want)
+	}
+}

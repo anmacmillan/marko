@@ -323,6 +323,11 @@ func (e *editor) draw() {
 func (e *editor) drawLine(row int, line string, current bool, width int) {
 	style := tcell.StyleDefault.Foreground(tcell.ColorSilver)
 	trimmed := strings.TrimSpace(line)
+	y := row + e.top
+	if e.inTable(y) && !e.cursorInSameTable(y) {
+		line = e.renderTableLine(y)
+		style = style.Foreground(tcell.ColorPaleGreen)
+	}
 	if !current {
 		switch {
 		case strings.HasPrefix(trimmed, "# "):
@@ -335,11 +340,54 @@ func (e *editor) drawLine(row int, line string, current bool, width int) {
 			style = style.Foreground(tcell.ColorGray)
 		case isSeparator(line):
 			style = style.Foreground(tcell.ColorDarkCyan)
-		case e.inTable(row + e.top):
+		case e.inTable(y):
 			style = style.Foreground(tcell.ColorPaleGreen)
 		}
 	}
 	e.put(0, row, line, style, width)
+}
+
+func (e *editor) cursorInSameTable(y int) bool {
+	if !e.inTable(e.y) {
+		return false
+	}
+	start, end := e.tableBounds(e.y)
+	return y >= start && y <= end
+}
+
+func (e *editor) renderTableLine(y int) string {
+	start, end := e.tableBounds(y)
+	widths := []int{}
+	for lineY := start; lineY <= end; lineY++ {
+		if isSeparator(e.lines[lineY]) {
+			continue
+		}
+		for col, cell := range splitTable(e.lines[lineY]) {
+			for len(widths) <= col {
+				widths = append(widths, 3)
+			}
+			widths[col] = max(widths[col], runeLen(cell))
+		}
+	}
+
+	cells := splitTable(e.lines[y])
+	if isSeparator(e.lines[y]) {
+		parts := make([]string, len(widths))
+		for col, width := range widths {
+			parts[col] = strings.Repeat("─", width+2)
+		}
+		return "├" + strings.Join(parts, "┼") + "┤"
+	}
+
+	parts := make([]string, len(widths))
+	for col, width := range widths {
+		value := ""
+		if col < len(cells) {
+			value = cells[col]
+		}
+		parts[col] = " " + value + strings.Repeat(" ", width-runeLen(value)+1)
+	}
+	return "│" + strings.Join(parts, "│") + "│"
 }
 
 func (e *editor) put(x, y int, text string, style tcell.Style, maxWidth int) {
