@@ -334,6 +334,14 @@ func TestSelectWordAt(t *testing.T) {
 	}
 }
 
+func TestSelectLineAt(t *testing.T) {
+	e := &editor{lines: []string{"one", "select this", "three"}}
+	e.selectLineAt(1)
+	if got, want := e.selectionText(), "select this"; got != want {
+		t.Fatalf("selected line = %q, want %q", got, want)
+	}
+}
+
 func TestLightThemeHasWhiteBackground(t *testing.T) {
 	if got := themeByName("light").background; got != tcell.ColorWhite {
 		t.Fatalf("light background = %v, want white", got)

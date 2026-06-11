@@ -36,6 +36,7 @@ type editor struct {
 	lastClick   time.Time
 	clickX      int
 	clickY      int
+	clickCount  int
 	search      string
 	replace     string
 	lastAction  time.Time
@@ -267,15 +268,25 @@ func (e *editor) mouse(ev *tcell.EventMouse) {
 	x = min(runeLen(e.lines[y]), max(0, rows[index].start+x-left))
 	if ev.Buttons()&tcell.Button1 != 0 {
 		if time.Since(e.lastClick) < 400*time.Millisecond && e.clickX == x && e.clickY == y {
+			e.clickCount++
+		} else {
+			e.clickCount = 1
+		}
+		e.lastClick, e.clickX, e.clickY = time.Now(), x, y
+		if e.clickCount >= 3 {
+			e.selectLineAt(y)
+			e.mouseDown = false
+			e.clickCount = 0
+			return
+		}
+		if e.clickCount == 2 {
 			e.selectWordAt(x, y)
 			e.mouseDown = false
-			e.lastClick = time.Time{}
 			return
 		}
 		if !e.mouseDown {
 			e.selX, e.selY = x, y
 			e.mouseDown = true
-			e.lastClick, e.clickX, e.clickY = time.Now(), x, y
 		}
 		e.x, e.y = x, y
 		e.selecting = e.selX != e.x || e.selY != e.y
@@ -284,6 +295,13 @@ func (e *editor) mouse(ev *tcell.EventMouse) {
 		e.selecting = e.selX != e.x || e.selY != e.y
 		e.mouseDown = false
 	}
+}
+
+func (e *editor) selectLineAt(y int) {
+	e.selX, e.selY = 0, y
+	e.x, e.y = runeLen(e.lines[y]), y
+	e.selecting = true
+	e.status = "Selected line"
 }
 
 func (e *editor) selectWordAt(x, y int) {

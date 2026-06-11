@@ -97,6 +97,7 @@ settings.
 - `Ctrl-R`: replace current match; press `Ctrl-A` in the replacement prompt to replace all
 - Shift + arrow keys or mouse drag: select text
 - Double-click a word: select it
+- Triple-click a line: select it
 - `Ctrl-C` / `Ctrl-X` / `Ctrl-V`: copy / cut / paste
 - Typing, Backspace, or Delete replaces/removes selected text
 - `Ctrl-Space`: toggle a checkbox on the current line
