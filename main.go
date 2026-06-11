@@ -1,0 +1,387 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"unicode/utf8"
+
+	"github.com/gdamore/tcell/v2"
+)
+
+type editor struct {
+	screen      tcell.Screen
+	path        string
+	lines       []string
+	x, y, top   int
+	dirty       bool
+	status      string
+	confirmQuit bool
+	preferredX  int
+}
+
+func main() {
+	if len(os.Args) != 2 {
+		fmt.Fprintln(os.Stderr, "usage: marco FILE.md")
+		os.Exit(2)
+	}
+	e, err := newEditor(os.Args[1])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	defer e.screen.Fini()
+	e.run()
+}
+
+func newEditor(path string) (*editor, error) {
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	text := strings.ReplaceAll(string(data), "\r\n", "\n")
+	lines := strings.Split(text, "\n")
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	s, err := tcell.NewScreen()
+	if err != nil {
+		return nil, err
+	}
+	if err := s.Init(); err != nil {
+		return nil, err
+	}
+	return &editor{screen: s, path: path, lines: lines, status: "Ctrl-T new table  Ctrl-S save  Ctrl-Q quit"}, nil
+}
+
+func (e *editor) run() {
+	for {
+		e.draw()
+		switch ev := e.screen.PollEvent().(type) {
+		case *tcell.EventResize:
+			e.screen.Sync()
+		case *tcell.EventKey:
+			if e.key(ev) {
+				return
+			}
+		}
+	}
+}
+
+func (e *editor) key(ev *tcell.EventKey) bool {
+	switch ev.Key() {
+	case tcell.KeyCtrlQ:
+		if e.dirty && !e.confirmQuit {
+			e.status = "Unsaved changes. Press Ctrl-Q again to quit."
+			e.confirmQuit = true
+			return false
+		}
+		return true
+	case tcell.KeyCtrlS:
+		e.save()
+	case tcell.KeyCtrlT:
+		e.insertTable()
+	case tcell.KeyUp:
+		e.moveVertical(-1)
+	case tcell.KeyDown:
+		e.moveVertical(1)
+	case tcell.KeyLeft:
+		if e.x > 0 {
+			e.x--
+		} else if e.y > 0 {
+			e.y--
+			e.x = runeLen(e.lines[e.y])
+		}
+	case tcell.KeyRight:
+		if e.x < runeLen(e.lines[e.y]) {
+			e.x++
+		} else if e.y+1 < len(e.lines) {
+			e.y++
+			e.x = 0
+		}
+	case tcell.KeyHome:
+		e.x = 0
+	case tcell.KeyEnd:
+		e.x = runeLen(e.lines[e.y])
+	case tcell.KeyPgUp:
+		e.y = max(0, e.y-10)
+		e.clampX()
+	case tcell.KeyPgDn:
+		e.y = min(len(e.lines)-1, e.y+10)
+		e.clampX()
+	case tcell.KeyBackspace, tcell.KeyBackspace2:
+		e.backspace()
+	case tcell.KeyDelete:
+		e.delete()
+	case tcell.KeyEnter:
+		e.enter()
+	case tcell.KeyTab:
+		if !e.nextTableCell() {
+			e.insert("    ")
+		}
+	case tcell.KeyRune:
+		e.insert(string(ev.Rune()))
+	}
+	e.confirmQuit = false
+	e.preferredX = e.x
+	return false
+}
+
+func (e *editor) insertTable() {
+	r := []rune(e.lines[e.y])
+	before, after := string(r[:e.x]), string(r[e.x:])
+	table := []string{
+		before + "| Heading 1 | Heading 2 |",
+		"| --------- | --------- |",
+		"|           |           |" + after,
+	}
+	e.lines = append(e.lines[:e.y], append(table, e.lines[e.y+1:]...)...)
+	e.x = runeLen(before) + 2
+	e.dirty = true
+	e.status = "Table created. Type a heading, then press Tab."
+}
+
+func (e *editor) insert(s string) {
+	r := []rune(e.lines[e.y])
+	e.lines[e.y] = string(r[:e.x]) + s + string(r[e.x:])
+	e.x += runeLen(s)
+	e.dirty = true
+}
+
+func (e *editor) backspace() {
+	if e.x > 0 {
+		r := []rune(e.lines[e.y])
+		e.lines[e.y] = string(r[:e.x-1]) + string(r[e.x:])
+		e.x--
+		e.dirty = true
+	} else if e.y > 0 {
+		x := runeLen(e.lines[e.y-1])
+		e.lines[e.y-1] += e.lines[e.y]
+		e.lines = append(e.lines[:e.y], e.lines[e.y+1:]...)
+		e.y--
+		e.x = x
+		e.dirty = true
+	}
+}
+
+func (e *editor) delete() {
+	r := []rune(e.lines[e.y])
+	if e.x < len(r) {
+		e.lines[e.y] = string(r[:e.x]) + string(r[e.x+1:])
+		e.dirty = true
+	} else if e.y+1 < len(e.lines) {
+		e.lines[e.y] += e.lines[e.y+1]
+		e.lines = append(e.lines[:e.y+1], e.lines[e.y+2:]...)
+		e.dirty = true
+	}
+}
+
+func (e *editor) enter() {
+	if e.inTable(e.y) {
+		cells := splitTable(e.lines[e.y])
+		row := "| " + strings.Repeat(" | ", max(0, len(cells)-1)) + "|"
+		e.lines = insertLine(e.lines, e.y+1, row)
+		e.y++
+		e.x = 2
+		e.formatTable()
+		return
+	}
+	r := []rune(e.lines[e.y])
+	left, right := string(r[:e.x]), string(r[e.x:])
+	e.lines[e.y] = left
+	e.lines = insertLine(e.lines, e.y+1, right)
+	e.y++
+	e.x = 0
+	e.dirty = true
+}
+
+func (e *editor) nextTableCell() bool {
+	if !e.inTable(e.y) {
+		return false
+	}
+	e.formatTable()
+	r := []rune(e.lines[e.y])
+	for i := e.x + 1; i < len(r); i++ {
+		if r[i] == '|' && i+2 < len(r) {
+			e.x = i + 2
+			return true
+		}
+	}
+	start, end := e.tableBounds(e.y)
+	next := e.y + 1
+	if next <= end && isSeparator(e.lines[next]) {
+		next++
+	}
+	if next <= end {
+		e.y, e.x = next, 2
+		return true
+	}
+	cells := splitTable(e.lines[start])
+	e.lines = insertLine(e.lines, end+1, "| "+strings.Repeat(" | ", max(0, len(cells)-1))+"|")
+	e.y, e.x = end+1, 2
+	e.formatTable()
+	return true
+}
+
+func (e *editor) inTable(y int) bool {
+	return y >= 0 && y < len(e.lines) && strings.Count(e.lines[y], "|") >= 2
+}
+
+func (e *editor) tableBounds(y int) (int, int) {
+	start, end := y, y
+	for start > 0 && e.inTable(start-1) {
+		start--
+	}
+	for end+1 < len(e.lines) && e.inTable(end+1) {
+		end++
+	}
+	return start, end
+}
+
+func (e *editor) formatTable() {
+	start, end := e.tableBounds(e.y)
+	rows := make([][]string, end-start+1)
+	widths := []int{}
+	for y := start; y <= end; y++ {
+		rows[y-start] = splitTable(e.lines[y])
+		if !isSeparator(e.lines[y]) {
+			for i, cell := range rows[y-start] {
+				for len(widths) <= i {
+					widths = append(widths, 3)
+				}
+				widths[i] = max(widths[i], runeLen(cell))
+			}
+		}
+	}
+	for i, cells := range rows {
+		out := make([]string, len(widths))
+		for col, width := range widths {
+			if isSeparator(e.lines[start+i]) {
+				out[col] = strings.Repeat("-", width)
+			} else {
+				value := ""
+				if col < len(cells) {
+					value = cells[col]
+				}
+				out[col] = value + strings.Repeat(" ", width-runeLen(value))
+			}
+		}
+		e.lines[start+i] = "| " + strings.Join(out, " | ") + " |"
+	}
+	e.dirty = true
+}
+
+func (e *editor) moveVertical(delta int) {
+	e.y = max(0, min(len(e.lines)-1, e.y+delta))
+	e.clampX()
+}
+
+func (e *editor) clampX() {
+	e.x = min(e.x, runeLen(e.lines[e.y]))
+}
+
+func (e *editor) save() {
+	text := strings.Join(e.lines, "\n")
+	if err := os.MkdirAll(filepath.Dir(e.path), 0755); err != nil {
+		e.status = err.Error()
+		return
+	}
+	if err := os.WriteFile(e.path, []byte(text), 0644); err != nil {
+		e.status = err.Error()
+		return
+	}
+	e.dirty = false
+	e.status = "Saved " + e.path
+}
+
+func (e *editor) draw() {
+	e.screen.Clear()
+	w, h := e.screen.Size()
+	bodyH := max(1, h-1)
+	if e.y < e.top {
+		e.top = e.y
+	}
+	if e.y >= e.top+bodyH {
+		e.top = e.y - bodyH + 1
+	}
+	for row := 0; row < bodyH && e.top+row < len(e.lines); row++ {
+		y := e.top + row
+		e.drawLine(row, e.lines[y], y == e.y, w)
+	}
+	name := filepath.Base(e.path)
+	mark := ""
+	if e.dirty {
+		mark = " *"
+	}
+	status := fmt.Sprintf(" %s%s  Ln %d, Col %d  %s", name, mark, e.y+1, e.x+1, e.status)
+	e.put(0, h-1, status, tcell.StyleDefault.Background(tcell.ColorDarkSlateGray).Foreground(tcell.ColorWhite), w)
+	e.screen.ShowCursor(e.x, e.y-e.top)
+	e.screen.Show()
+}
+
+func (e *editor) drawLine(row int, line string, current bool, width int) {
+	style := tcell.StyleDefault.Foreground(tcell.ColorSilver)
+	trimmed := strings.TrimSpace(line)
+	if !current {
+		switch {
+		case strings.HasPrefix(trimmed, "# "):
+			style = style.Bold(true).Foreground(tcell.ColorLightSkyBlue)
+		case strings.HasPrefix(trimmed, "## "):
+			style = style.Bold(true).Foreground(tcell.ColorLightGreen)
+		case strings.HasPrefix(trimmed, "### "):
+			style = style.Bold(true).Foreground(tcell.ColorLightGoldenrodYellow)
+		case strings.HasPrefix(trimmed, ">"):
+			style = style.Foreground(tcell.ColorGray)
+		case isSeparator(line):
+			style = style.Foreground(tcell.ColorDarkCyan)
+		case e.inTable(row + e.top):
+			style = style.Foreground(tcell.ColorPaleGreen)
+		}
+	}
+	e.put(0, row, line, style, width)
+}
+
+func (e *editor) put(x, y int, text string, style tcell.Style, maxWidth int) {
+	for _, r := range text {
+		if x >= maxWidth {
+			break
+		}
+		e.screen.SetContent(x, y, r, nil, style)
+		x++
+	}
+}
+
+func splitTable(line string) []string {
+	line = strings.TrimSpace(strings.Trim(line, "|"))
+	parts := strings.Split(line, "|")
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	return parts
+}
+
+func isSeparator(line string) bool {
+	cells := splitTable(line)
+	if len(cells) == 0 {
+		return false
+	}
+	for _, c := range cells {
+		c = strings.Trim(c, ":")
+		if len(c) < 3 || strings.Trim(c, "-") != "" {
+			return false
+		}
+	}
+	return true
+}
+
+func insertLine(lines []string, at int, value string) []string {
+	lines = append(lines, "")
+	copy(lines[at+1:], lines[at:])
+	lines[at] = value
+	return lines
+}
+
+func runeLen(s string) int {
+	return utf8.RuneCountInString(s)
+}
