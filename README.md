@@ -15,6 +15,7 @@ It intentionally focuses on the parts of Markdown that provide most of the
 value in everyday notes and documents:
 
 - familiar, low-friction text editing
+- undo/redo, search, selection, clipboard, mouse placement, and soft wrapping
 - visually distinct headings
 - clean rendered headings that reveal their Markdown markers when entered
 - rendered bold, italic, and struck-through text that reveals its markers when entered
@@ -62,10 +63,15 @@ for future launches.
 - Type, Backspace, Delete, Enter: edit normally
 - `Ctrl-T`: create a two-column table at the cursor
 - `Ctrl-G`: cycle and remember the colour theme
+- `Ctrl-Z` / `Ctrl-Y`: undo / redo
+- `Ctrl-F`: find the next matching text
+- Shift + arrow keys or mouse drag: select text
+- `Ctrl-C` / `Ctrl-X` / `Ctrl-V`: copy / cut / paste
 - `Tab`: insert spaces, or move to the next cell inside a Markdown table
 - `Enter` in a table: add a row
 - `Ctrl-S`: save
 - `Ctrl-Q`: quit
 
-This is an early prototype. It does not yet support selection, clipboard,
-undo/redo, search, or soft wrapping.
+After five seconds without input, Marko enters focus mode: the status bar
+disappears and surrounding text becomes quieter. Any key or mouse action exits
+focus mode immediately.

@@ -130,3 +130,35 @@ func TestThemeNamesAreValid(t *testing.T) {
 		t.Fatal("unknown theme accepted")
 	}
 }
+
+func TestVisualRowsWrapAndMap(t *testing.T) {
+	e := &editor{lines: []string{"abcdefgh", "xy"}, x: 6, y: 0}
+	rows := e.visualRows(4)
+	if len(rows) != 3 || rows[1].text != "efgh" || rows[1].start != 4 {
+		t.Fatalf("visualRows() = %#v", rows)
+	}
+	if got := e.cursorVisualRow(rows); got != 1 {
+		t.Fatalf("cursorVisualRow() = %d, want 1", got)
+	}
+}
+
+func TestUndoRedo(t *testing.T) {
+	e := &editor{lines: []string{"a"}, x: 1}
+	e.checkpoint()
+	e.insert("b")
+	e.undoEdit()
+	if e.lines[0] != "a" {
+		t.Fatalf("undo = %q", e.lines[0])
+	}
+	e.redoEdit()
+	if e.lines[0] != "ab" {
+		t.Fatalf("redo = %q", e.lines[0])
+	}
+}
+
+func TestSelectionText(t *testing.T) {
+	e := &editor{lines: []string{"abc", "def"}, selX: 1, selY: 0, x: 2, y: 1, selecting: true}
+	if got, want := e.selectionText(), "bc\nde"; got != want {
+		t.Fatalf("selectionText() = %q, want %q", got, want)
+	}
+}

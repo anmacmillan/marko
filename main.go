@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -26,6 +27,23 @@ type editor struct {
 	recovery    string
 	theme       theme
 	themeName   string
+	undo, redo  []snapshot
+	selecting   bool
+	selX, selY  int
+	mouseDown   bool
+	search      string
+	lastAction  time.Time
+	focusMode   bool
+}
+
+type snapshot struct {
+	lines []string
+	x, y  int
+}
+
+type visualRow struct {
+	y, start int
+	text     string
 }
 
 type theme struct {
@@ -75,9 +93,11 @@ func newEditor(path string) (*editor, error) {
 	if err := s.Init(); err != nil {
 		return nil, err
 	}
+	s.EnableMouse()
+	s.EnablePaste()
 	status := "Ctrl-T new table  Ctrl-S save  Ctrl-Q quit"
 	themeName := selectedThemeName()
-	return &editor{screen: s, path: path, lines: lines, status: status, themeName: themeName, theme: themeByName(themeName)}, nil
+	return &editor{screen: s, path: path, lines: lines, status: status, themeName: themeName, theme: themeByName(themeName), lastAction: time.Now()}, nil
 }
 
 func datedUntitledPath(now time.Time) string {
@@ -139,11 +159,40 @@ func (e *editor) run() {
 			e.screen.Sync()
 		case *tcell.EventInterrupt:
 			e.autosave()
+			e.focusMode = time.Since(e.lastAction) >= 5*time.Second
 		case *tcell.EventKey:
+			e.lastAction, e.focusMode = time.Now(), false
 			if e.key(ev) {
 				return
 			}
+		case *tcell.EventMouse:
+			e.lastAction, e.focusMode = time.Now(), false
+			e.mouse(ev)
+		case *tcell.EventClipboard:
+			e.insertText(string(ev.Data()))
 		}
+	}
+}
+
+func (e *editor) mouse(ev *tcell.EventMouse) {
+	x, sy := ev.Position()
+	w, h := e.screen.Size()
+	if sy >= h-1 {
+		return
+	}
+	rows := e.visualRows(max(1, w))
+	index := min(len(rows)-1, max(0, e.top+sy))
+	y := rows[index].y
+	x = min(runeLen(e.lines[y]), max(0, rows[index].start+x))
+	if ev.Buttons()&tcell.Button1 != 0 {
+		if !e.mouseDown {
+			e.selX, e.selY = x, y
+			e.mouseDown = true
+		}
+		e.x, e.y = x, y
+		e.selecting = e.selX != e.x || e.selY != e.y
+	} else {
+		e.mouseDown = false
 	}
 }
 
@@ -169,13 +218,34 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		}
 	case tcell.KeyCtrlG:
 		e.cycleTheme()
+	case tcell.KeyCtrlZ:
+		e.undoEdit()
+	case tcell.KeyCtrlY:
+		e.redoEdit()
+	case tcell.KeyCtrlF:
+		e.prompt = "Find: "
+		e.promptValue = e.search
+	case tcell.KeyCtrlC:
+		e.copySelection()
+	case tcell.KeyCtrlX:
+		e.cutSelection()
+	case tcell.KeyCtrlV:
+		if data, err := exec.Command("pbpaste").Output(); err == nil {
+			e.insertText(string(data))
+		} else {
+			e.screen.GetClipboard()
+		}
 	case tcell.KeyCtrlT:
+		e.checkpoint()
 		e.insertTable()
 	case tcell.KeyUp:
+		e.beginKeyboardSelection(ev.Modifiers())
 		e.moveVertical(-1)
 	case tcell.KeyDown:
+		e.beginKeyboardSelection(ev.Modifiers())
 		e.moveVertical(1)
 	case tcell.KeyLeft:
+		e.beginKeyboardSelection(ev.Modifiers())
 		if e.x > 0 {
 			e.x--
 		} else if e.y > 0 {
@@ -183,6 +253,7 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 			e.x = runeLen(e.lines[e.y])
 		}
 	case tcell.KeyRight:
+		e.beginKeyboardSelection(ev.Modifiers())
 		if e.x < runeLen(e.lines[e.y]) {
 			e.x++
 		} else if e.y+1 < len(e.lines) {
@@ -200,16 +271,21 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		e.y = min(len(e.lines)-1, e.y+10)
 		e.clampX()
 	case tcell.KeyBackspace, tcell.KeyBackspace2:
+		e.checkpoint()
 		e.backspace()
 	case tcell.KeyDelete:
+		e.checkpoint()
 		e.delete()
 	case tcell.KeyEnter:
+		e.checkpoint()
 		e.enter()
 	case tcell.KeyTab:
+		e.checkpoint()
 		if !e.nextTableCell() {
 			e.insert("    ")
 		}
 	case tcell.KeyRune:
+		e.checkpoint()
 		e.insert(string(ev.Rune()))
 	}
 	e.confirmQuit = false
@@ -243,6 +319,12 @@ func (e *editor) promptKey(ev *tcell.EventKey) {
 		e.prompt, e.promptValue = "", ""
 		e.status = "Save cancelled"
 	case tcell.KeyEnter:
+		if e.prompt == "Find: " {
+			e.search = e.promptValue
+			e.prompt, e.promptValue = "", ""
+			e.findNext()
+			return
+		}
 		path := strings.TrimSpace(e.promptValue)
 		if path == "" {
 			e.status = "Enter a filename"
@@ -261,6 +343,137 @@ func (e *editor) promptKey(ev *tcell.EventKey) {
 		}
 	case tcell.KeyRune:
 		e.promptValue += string(ev.Rune())
+	}
+}
+
+func (e *editor) checkpoint() {
+	e.undo = append(e.undo, snapshot{append([]string(nil), e.lines...), e.x, e.y})
+	if len(e.undo) > 200 {
+		e.undo = e.undo[1:]
+	}
+	e.redo = nil
+}
+
+func (e *editor) restore(s snapshot) {
+	e.lines, e.x, e.y = append([]string(nil), s.lines...), s.x, s.y
+	e.dirty = true
+	e.selecting = false
+}
+
+func (e *editor) undoEdit() {
+	if len(e.undo) == 0 {
+		e.status = "Nothing to undo"
+		return
+	}
+	e.redo = append(e.redo, snapshot{append([]string(nil), e.lines...), e.x, e.y})
+	s := e.undo[len(e.undo)-1]
+	e.undo = e.undo[:len(e.undo)-1]
+	e.restore(s)
+	e.status = "Undo"
+}
+
+func (e *editor) redoEdit() {
+	if len(e.redo) == 0 {
+		e.status = "Nothing to redo"
+		return
+	}
+	e.undo = append(e.undo, snapshot{append([]string(nil), e.lines...), e.x, e.y})
+	s := e.redo[len(e.redo)-1]
+	e.redo = e.redo[:len(e.redo)-1]
+	e.restore(s)
+	e.status = "Redo"
+}
+
+func (e *editor) findNext() {
+	if e.search == "" {
+		return
+	}
+	for offset := 0; offset < len(e.lines); offset++ {
+		y := (e.y + offset) % len(e.lines)
+		start := 0
+		if offset == 0 {
+			start = min(e.x+1, len([]rune(e.lines[y])))
+		}
+		if index := strings.Index(string([]rune(e.lines[y])[start:]), e.search); index >= 0 {
+			e.y, e.x = y, start+runeLen(string([]rune(e.lines[y])[start:start+index]))
+			e.status = "Found: " + e.search
+			return
+		}
+	}
+	e.status = "Not found: " + e.search
+}
+
+func (e *editor) beginKeyboardSelection(mod tcell.ModMask) {
+	if mod&tcell.ModShift != 0 {
+		if !e.selecting {
+			e.selX, e.selY, e.selecting = e.x, e.y, true
+		}
+	} else {
+		e.selecting = false
+	}
+}
+
+func (e *editor) selectionText() string {
+	if !e.selecting || (e.selX == e.x && e.selY == e.y) {
+		return ""
+	}
+	ax, ay, bx, by := e.selX, e.selY, e.x, e.y
+	if ay > by || (ay == by && ax > bx) {
+		ax, ay, bx, by = bx, by, ax, ay
+	}
+	if ay == by {
+		return string([]rune(e.lines[ay])[ax:bx])
+	}
+	parts := []string{string([]rune(e.lines[ay])[ax:])}
+	parts = append(parts, e.lines[ay+1:by]...)
+	parts = append(parts, string([]rune(e.lines[by])[:bx]))
+	return strings.Join(parts, "\n")
+}
+
+func (e *editor) copySelection() {
+	text := e.selectionText()
+	if text == "" {
+		e.status = "Nothing selected"
+		return
+	}
+	cmd := exec.Command("pbcopy")
+	cmd.Stdin = strings.NewReader(text)
+	_ = cmd.Run()
+	e.screen.SetClipboard([]byte(text))
+	e.status = "Copied selection"
+}
+
+func (e *editor) cutSelection() {
+	if e.selectionText() == "" {
+		return
+	}
+	e.copySelection()
+	e.checkpoint()
+	e.deleteSelection()
+}
+
+func (e *editor) deleteSelection() {
+	ax, ay, bx, by := e.selX, e.selY, e.x, e.y
+	if ay > by || (ay == by && ax > bx) {
+		ax, ay, bx, by = bx, by, ax, ay
+	}
+	left, right := []rune(e.lines[ay])[:ax], []rune(e.lines[by])[bx:]
+	e.lines[ay] = string(left) + string(right)
+	e.lines = append(e.lines[:ay+1], e.lines[by+1:]...)
+	e.x, e.y, e.selecting, e.dirty = ax, ay, false, true
+}
+
+func (e *editor) insertText(text string) {
+	e.checkpoint()
+	if e.selecting {
+		e.deleteSelection()
+	}
+	parts := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	for i, part := range parts {
+		if i > 0 {
+			e.enter()
+		}
+		e.insert(part)
 	}
 }
 
@@ -444,16 +657,22 @@ func (e *editor) autosave() {
 func (e *editor) draw() {
 	e.screen.Clear()
 	w, h := e.screen.Size()
-	bodyH := max(1, h-1)
-	if e.y < e.top {
-		e.top = e.y
+	statusRows := 1
+	if e.focusMode {
+		statusRows = 0
 	}
-	if e.y >= e.top+bodyH {
-		e.top = e.y - bodyH + 1
+	bodyH := max(1, h-statusRows)
+	rows := e.visualRows(max(1, w))
+	cursorRow := e.cursorVisualRow(rows)
+	if cursorRow < e.top {
+		e.top = cursorRow
 	}
-	for row := 0; row < bodyH && e.top+row < len(e.lines); row++ {
-		y := e.top + row
-		e.drawLine(row, e.lines[y], y == e.y, w)
+	if cursorRow >= e.top+bodyH {
+		e.top = cursorRow - bodyH + 1
+	}
+	for row := 0; row < bodyH && e.top+row < len(rows); row++ {
+		vr := rows[e.top+row]
+		e.drawVisualLine(row, vr, vr.y == e.y, w)
 	}
 	name := filepath.Base(e.path)
 	if e.path == "" {
@@ -467,19 +686,61 @@ func (e *editor) draw() {
 	if e.prompt != "" {
 		status = " " + e.prompt + e.promptValue
 	}
-	e.put(0, h-1, status, tcell.StyleDefault.Background(e.theme.statusBG).Foreground(e.theme.statusFG), w)
+	if !e.focusMode {
+		e.put(0, h-1, status, tcell.StyleDefault.Background(e.theme.statusBG).Foreground(e.theme.statusFG), w)
+	}
 	if e.prompt != "" {
 		e.screen.ShowCursor(1+runeLen(e.prompt)+runeLen(e.promptValue), h-1)
 	} else {
-		e.screen.ShowCursor(e.x, e.y-e.top)
+		vr := rows[cursorRow]
+		e.screen.ShowCursor(e.x-vr.start, cursorRow-e.top)
 	}
 	e.screen.Show()
 }
 
-func (e *editor) drawLine(row int, line string, current bool, width int) {
+func (e *editor) visualRows(width int) []visualRow {
+	rows := []visualRow{}
+	for y, line := range e.lines {
+		runes := []rune(line)
+		if len(runes) == 0 {
+			rows = append(rows, visualRow{y: y})
+			continue
+		}
+		for start := 0; start < len(runes); start += width {
+			end := min(len(runes), start+width)
+			rows = append(rows, visualRow{y: y, start: start, text: string(runes[start:end])})
+		}
+	}
+	return rows
+}
+
+func (e *editor) cursorVisualRow(rows []visualRow) int {
+	for i := len(rows) - 1; i >= 0; i-- {
+		if rows[i].y == e.y && rows[i].start <= e.x {
+			return i
+		}
+	}
+	return 0
+}
+
+func (e *editor) drawVisualLine(row int, vr visualRow, current bool, width int) {
+	if vr.start == 0 && runeLen(vr.text) == runeLen(e.lines[vr.y]) {
+		e.drawLine(row, vr.y, vr.text, current, width)
+		return
+	}
 	style := tcell.StyleDefault.Foreground(e.theme.text)
+	if e.focusMode && !current {
+		style = style.Foreground(tcell.ColorGray)
+	}
+	e.putSelected(row, vr.text, style, width, vr.y, vr.start)
+}
+
+func (e *editor) drawLine(row, y int, line string, current bool, width int) {
+	style := tcell.StyleDefault.Foreground(e.theme.text)
+	if e.focusMode && !current {
+		style = style.Foreground(tcell.ColorGray)
+	}
 	trimmed := strings.TrimSpace(line)
-	y := row + e.top
 	if e.inTable(y) && !e.cursorInSameTable(y) {
 		line = e.renderTableLine(y)
 		style = style.Foreground(e.theme.table)
@@ -506,10 +767,34 @@ func (e *editor) drawLine(row int, line string, current bool, width int) {
 		}
 	}
 	if current {
-		e.put(0, row, line, style, width)
+		e.putSelected(row, line, style, width, y, 0)
 	} else {
 		e.putInline(0, row, line, style, width)
 	}
+}
+
+func (e *editor) putSelected(row int, text string, style tcell.Style, width, y, start int) {
+	for x, r := range []rune(text) {
+		if x >= width {
+			break
+		}
+		s := style
+		if e.positionSelected(start+x, y) {
+			s = s.Reverse(true)
+		}
+		e.screen.SetContent(x, row, r, nil, s)
+	}
+}
+
+func (e *editor) positionSelected(x, y int) bool {
+	if !e.selecting {
+		return false
+	}
+	ax, ay, bx, by := e.selX, e.selY, e.x, e.y
+	if ay > by || (ay == by && ax > bx) {
+		ax, ay, bx, by = bx, by, ax, ay
+	}
+	return (y > ay || (y == ay && x >= ax)) && (y < by || (y == by && x < bx))
 }
 
 func heading(line string) (int, string, bool) {
