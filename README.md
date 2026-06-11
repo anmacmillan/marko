@@ -77,6 +77,11 @@ Set `MARKO_THEME` in your shell profile to make a theme permanent.
 Press `Ctrl-G` inside Marko to cycle themes. The selected theme is remembered
 for future launches.
 
+Marko uses the font configured by your terminal because terminal applications
+cannot select their own fonts. For a warmer, Medium-like writing feel, try
+Berkeley Mono, iA Writer Mono, or Atkinson Hyperlegible Mono in cmux's terminal
+settings.
+
 ## Keys
 
 - Arrow keys, Home, End, Page Up, Page Down: move
@@ -91,7 +96,9 @@ for future launches.
 - `Ctrl-P`: previous search match
 - `Ctrl-R`: replace current match; press `Ctrl-A` in the replacement prompt to replace all
 - Shift + arrow keys or mouse drag: select text
+- Double-click a word: select it
 - `Ctrl-C` / `Ctrl-X` / `Ctrl-V`: copy / cut / paste
+- Typing, Backspace, or Delete replaces/removes selected text
 - `Ctrl-Space`: toggle a checkbox on the current line
 - `Ctrl-O`: open a Markdown or web link on the current line
 - `Tab`: insert spaces, or move to the next cell inside a Markdown table

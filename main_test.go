@@ -316,3 +316,26 @@ func TestWritingArea(t *testing.T) {
 		t.Fatalf("writingArea(60) = %d, %d; want 2, 56", left, width)
 	}
 }
+
+func TestTypingReplacesSelection(t *testing.T) {
+	e := &editor{lines: []string{"hello world"}, selX: 6, selY: 0, x: 11, y: 0, selecting: true}
+	e.deleteSelection()
+	e.insert("Marko")
+	if got, want := e.lines[0], "hello Marko"; got != want {
+		t.Fatalf("selection replacement = %q, want %q", got, want)
+	}
+}
+
+func TestSelectWordAt(t *testing.T) {
+	e := &editor{lines: []string{"hello Marko world"}}
+	e.selectWordAt(8, 0)
+	if got, want := e.selectionText(), "Marko"; got != want {
+		t.Fatalf("selected word = %q, want %q", got, want)
+	}
+}
+
+func TestLightThemeHasWhiteBackground(t *testing.T) {
+	if got := themeByName("light").background; got != tcell.ColorWhite {
+		t.Fatalf("light background = %v, want white", got)
+	}
+}

@@ -33,6 +33,9 @@ type editor struct {
 	selecting   bool
 	selX, selY  int
 	mouseDown   bool
+	lastClick   time.Time
+	clickX      int
+	clickY      int
 	search      string
 	replace     string
 	lastAction  time.Time
@@ -56,7 +59,7 @@ type visualRow struct {
 }
 
 type theme struct {
-	text, heading1, heading2, heading3, table, quote, statusBG, statusFG tcell.Color
+	text, heading1, heading2, heading3, table, quote, background, statusBG, statusFG tcell.Color
 }
 
 var themeNames = []string{"calm", "green", "mono", "light"}
@@ -156,13 +159,13 @@ func validTheme(name string) bool {
 func themeByName(name string) theme {
 	switch name {
 	case "green":
-		return theme{tcell.ColorPaleGreen, tcell.ColorLightGreen, tcell.ColorGreen, tcell.ColorDarkSeaGreen, tcell.ColorPaleGreen, tcell.ColorGray, tcell.ColorDarkGreen, tcell.ColorWhite}
+		return theme{tcell.ColorPaleGreen, tcell.ColorLightGreen, tcell.ColorGreen, tcell.ColorDarkSeaGreen, tcell.ColorPaleGreen, tcell.ColorGray, tcell.ColorDefault, tcell.ColorDarkGreen, tcell.ColorWhite}
 	case "mono":
-		return theme{tcell.ColorSilver, tcell.ColorWhite, tcell.ColorWhite, tcell.ColorSilver, tcell.ColorSilver, tcell.ColorGray, tcell.ColorGray, tcell.ColorBlack}
+		return theme{tcell.ColorSilver, tcell.ColorWhite, tcell.ColorWhite, tcell.ColorSilver, tcell.ColorSilver, tcell.ColorGray, tcell.ColorDefault, tcell.ColorGray, tcell.ColorBlack}
 	case "light":
-		return theme{tcell.ColorBlack, tcell.ColorDarkBlue, tcell.ColorDarkGreen, tcell.ColorDarkGoldenrod, tcell.ColorDarkGreen, tcell.ColorDarkSlateGray, tcell.ColorLightGray, tcell.ColorBlack}
+		return theme{tcell.ColorBlack, tcell.ColorDarkBlue, tcell.ColorDarkGreen, tcell.ColorDarkGoldenrod, tcell.ColorDarkGreen, tcell.ColorDarkSlateGray, tcell.ColorWhite, tcell.ColorLightGray, tcell.ColorBlack}
 	default:
-		return theme{tcell.ColorSilver, tcell.ColorLightSkyBlue, tcell.ColorLightGreen, tcell.ColorLightGoldenrodYellow, tcell.ColorPaleGreen, tcell.ColorGray, tcell.ColorDarkSlateGray, tcell.ColorWhite}
+		return theme{tcell.ColorSilver, tcell.ColorLightSkyBlue, tcell.ColorLightGreen, tcell.ColorLightGoldenrodYellow, tcell.ColorPaleGreen, tcell.ColorGray, tcell.ColorDefault, tcell.ColorDarkSlateGray, tcell.ColorWhite}
 	}
 }
 
@@ -263,15 +266,47 @@ func (e *editor) mouse(ev *tcell.EventMouse) {
 	y := rows[index].y
 	x = min(runeLen(e.lines[y]), max(0, rows[index].start+x-left))
 	if ev.Buttons()&tcell.Button1 != 0 {
+		if time.Since(e.lastClick) < 400*time.Millisecond && e.clickX == x && e.clickY == y {
+			e.selectWordAt(x, y)
+			e.mouseDown = false
+			e.lastClick = time.Time{}
+			return
+		}
 		if !e.mouseDown {
 			e.selX, e.selY = x, y
 			e.mouseDown = true
+			e.lastClick, e.clickX, e.clickY = time.Now(), x, y
 		}
 		e.x, e.y = x, y
 		e.selecting = e.selX != e.x || e.selY != e.y
-	} else {
+	} else if e.mouseDown && ev.Buttons() == tcell.ButtonNone {
+		e.x, e.y = x, y
+		e.selecting = e.selX != e.x || e.selY != e.y
 		e.mouseDown = false
 	}
+}
+
+func (e *editor) selectWordAt(x, y int) {
+	runes := []rune(e.lines[y])
+	if len(runes) == 0 {
+		return
+	}
+	x = min(x, len(runes)-1)
+	isWord := func(r rune) bool {
+		return r == '_' || r == '-' || r >= '0' && r <= '9' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r > 127
+	}
+	if !isWord(runes[x]) {
+		return
+	}
+	start, end := x, x+1
+	for start > 0 && isWord(runes[start-1]) {
+		start--
+	}
+	for end < len(runes) && isWord(runes[end]) {
+		end++
+	}
+	e.selX, e.selY, e.x, e.y, e.selecting = start, y, end, y, true
+	e.status = "Selected word"
 }
 
 func writingArea(screenWidth int) (int, int) {
@@ -384,10 +419,18 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		e.clampX()
 	case tcell.KeyBackspace, tcell.KeyBackspace2:
 		e.checkpoint()
-		e.backspace()
+		if e.selecting {
+			e.deleteSelection()
+		} else {
+			e.backspace()
+		}
 	case tcell.KeyDelete:
 		e.checkpoint()
-		e.delete()
+		if e.selecting {
+			e.deleteSelection()
+		} else {
+			e.delete()
+		}
 	case tcell.KeyEnter:
 		e.checkpoint()
 		e.enter()
@@ -398,6 +441,9 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		}
 	case tcell.KeyRune:
 		e.checkpoint()
+		if e.selecting {
+			e.deleteSelection()
+		}
 		e.insert(string(ev.Rune()))
 	}
 	e.confirmQuit = false
@@ -1060,6 +1106,10 @@ func (e *editor) draw() {
 	}
 	bodyH := max(1, h-statusRows)
 	left, contentWidth := writingArea(w)
+	background := tcell.StyleDefault.Background(e.theme.background)
+	for row := 0; row < bodyH; row++ {
+		e.put(left, row, strings.Repeat(" ", contentWidth), background, w)
+	}
 	rows := e.visualRows(contentWidth)
 	cursorRow := e.cursorVisualRow(rows)
 	if cursorRow < e.top {
@@ -1191,7 +1241,7 @@ func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width
 		e.drawLine(left, row, vr.y, vr.text, current, width)
 		return
 	}
-	style := tcell.StyleDefault.Foreground(e.theme.text)
+	style := tcell.StyleDefault.Foreground(e.theme.text).Background(e.theme.background)
 	if e.focusMode && !current {
 		style = style.Foreground(tcell.ColorGray)
 	}
@@ -1199,7 +1249,7 @@ func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width
 }
 
 func (e *editor) drawLine(left, row, y int, line string, current bool, width int) {
-	style := tcell.StyleDefault.Foreground(e.theme.text)
+	style := tcell.StyleDefault.Foreground(e.theme.text).Background(e.theme.background)
 	if e.focusMode && !current {
 		style = style.Foreground(tcell.ColorGray)
 	}
