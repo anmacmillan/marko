@@ -5,6 +5,10 @@ A calm terminal Markdown editor.
 Marko uses familiar, modeless editing. It keeps Markdown as plain text,
 styles structure inline, and makes tables less awkward.
 
+On wide terminals, Marko centers an 88-column writing area by default, giving
+prose a calm Goyo-style layout instead of placing everything against the
+left-hand edge. Narrow panes continue to use the available width.
+
 ## Use case
 
 Marko is for people who like writing Markdown in the terminal but do not want

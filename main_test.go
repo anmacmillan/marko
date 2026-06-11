@@ -305,3 +305,14 @@ func TestRememberRecentMovesFileToFront(t *testing.T) {
 		t.Fatalf("recent ordering = %#v", got)
 	}
 }
+
+func TestWritingArea(t *testing.T) {
+	left, width := writingArea(120)
+	if left != 16 || width != 88 {
+		t.Fatalf("writingArea(120) = %d, %d; want 16, 88", left, width)
+	}
+	left, width = writingArea(60)
+	if left != 2 || width != 56 {
+		t.Fatalf("writingArea(60) = %d, %d; want 2, 56", left, width)
+	}
+}

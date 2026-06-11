@@ -61,6 +61,8 @@ type theme struct {
 
 var themeNames = []string{"calm", "green", "mono", "light"}
 
+const writingWidth = 88
+
 func main() {
 	if len(os.Args) > 2 {
 		fmt.Fprintln(os.Stderr, "usage: marko [FILE.md]")
@@ -255,10 +257,11 @@ func (e *editor) mouse(ev *tcell.EventMouse) {
 	if sy >= h-1 {
 		return
 	}
-	rows := e.visualRows(max(1, w))
+	left, contentWidth := writingArea(w)
+	rows := e.visualRows(contentWidth)
 	index := min(len(rows)-1, max(0, e.top+sy))
 	y := rows[index].y
-	x = min(runeLen(e.lines[y]), max(0, rows[index].start+x))
+	x = min(runeLen(e.lines[y]), max(0, rows[index].start+x-left))
 	if ev.Buttons()&tcell.Button1 != 0 {
 		if !e.mouseDown {
 			e.selX, e.selY = x, y
@@ -269,6 +272,11 @@ func (e *editor) mouse(ev *tcell.EventMouse) {
 	} else {
 		e.mouseDown = false
 	}
+}
+
+func writingArea(screenWidth int) (int, int) {
+	contentWidth := min(writingWidth, max(1, screenWidth-4))
+	return max(0, (screenWidth-contentWidth)/2), contentWidth
 }
 
 func (e *editor) key(ev *tcell.EventKey) bool {
@@ -1051,7 +1059,8 @@ func (e *editor) draw() {
 		statusRows = 0
 	}
 	bodyH := max(1, h-statusRows)
-	rows := e.visualRows(max(1, w))
+	left, contentWidth := writingArea(w)
+	rows := e.visualRows(contentWidth)
 	cursorRow := e.cursorVisualRow(rows)
 	if cursorRow < e.top {
 		e.top = cursorRow
@@ -1061,7 +1070,7 @@ func (e *editor) draw() {
 	}
 	for row := 0; row < bodyH && e.top+row < len(rows); row++ {
 		vr := rows[e.top+row]
-		e.drawVisualLine(row, vr, vr.y == e.y, w)
+		e.drawVisualLine(left, row, vr, vr.y == e.y, contentWidth)
 	}
 	name := filepath.Base(e.path)
 	if e.path == "" {
@@ -1088,7 +1097,7 @@ func (e *editor) draw() {
 		e.screen.ShowCursor(1+runeLen(e.prompt)+runeLen(e.promptValue), h-1)
 	} else {
 		vr := rows[cursorRow]
-		e.screen.ShowCursor(e.x-vr.start, cursorRow-e.top)
+		e.screen.ShowCursor(left+e.x-vr.start, cursorRow-e.top)
 	}
 	e.screen.Show()
 }
@@ -1177,19 +1186,19 @@ func (e *editor) cursorVisualRow(rows []visualRow) int {
 	return 0
 }
 
-func (e *editor) drawVisualLine(row int, vr visualRow, current bool, width int) {
+func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width int) {
 	if vr.start == 0 && runeLen(vr.text) == runeLen(e.lines[vr.y]) {
-		e.drawLine(row, vr.y, vr.text, current, width)
+		e.drawLine(left, row, vr.y, vr.text, current, width)
 		return
 	}
 	style := tcell.StyleDefault.Foreground(e.theme.text)
 	if e.focusMode && !current {
 		style = style.Foreground(tcell.ColorGray)
 	}
-	e.putSelected(row, vr.text, style, width, vr.y, vr.start)
+	e.putSelected(left, row, vr.text, style, width, vr.y, vr.start)
 }
 
-func (e *editor) drawLine(row, y int, line string, current bool, width int) {
+func (e *editor) drawLine(left, row, y int, line string, current bool, width int) {
 	style := tcell.StyleDefault.Foreground(e.theme.text)
 	if e.focusMode && !current {
 		style = style.Foreground(tcell.ColorGray)
@@ -1221,13 +1230,13 @@ func (e *editor) drawLine(row, y int, line string, current bool, width int) {
 		}
 	}
 	if current {
-		e.putSelected(row, line, style, width, y, 0)
+		e.putSelected(left, row, line, style, width, y, 0)
 	} else {
-		e.putInline(0, row, line, style, width)
+		e.putInline(left, row, line, style, left+width)
 	}
 }
 
-func (e *editor) putSelected(row int, text string, style tcell.Style, width, y, start int) {
+func (e *editor) putSelected(left, row int, text string, style tcell.Style, width, y, start int) {
 	for x, r := range []rune(text) {
 		if x >= width {
 			break
@@ -1238,7 +1247,7 @@ func (e *editor) putSelected(row int, text string, style tcell.Style, width, y, 
 		} else if e.positionMatchesSearch(start+x, y) {
 			s = s.Background(tcell.ColorDarkGoldenrod).Foreground(tcell.ColorWhite)
 		}
-		e.screen.SetContent(x, row, r, nil, s)
+		e.screen.SetContent(left+x, row, r, nil, s)
 	}
 }
 
