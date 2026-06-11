@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900">
+  <rect width="1440" height="900" rx="18" fill="#11161b"/>
+  <rect x="1" y="1" width="1438" height="898" rx="17" fill="none" stroke="#52605b"/>
+  <circle cx="28" cy="28" r="8" fill="#e67e80"/>
+  <circle cx="54" cy="28" r="8" fill="#dbbc7f"/>
+  <circle cx="80" cy="28" r="8" fill="#a7c080"/>
+  <text x="720" y="34" text-anchor="middle" font-family="ui-monospace, monospace" font-size="16" fill="#859289">marko — meeting-notes.md</text>
+
+  <g font-family="ui-monospace, monospace" font-size="20">
+    <text x="330" y="112" font-size="31" font-weight="700" fill="#83c092">Project notes</text>
+    <line x1="330" y1="124" x2="1110" y2="124" stroke="#83c092" opacity=".45"/>
+
+    <text x="330" y="174" fill="#d3c6aa">A calm place to write ordinary Markdown without a preview pane,</text>
+    <text x="330" y="204" fill="#d3c6aa">modal editing, or a heavyweight desktop application.</text>
+
+    <text x="330" y="270" font-size="25" font-weight="700" fill="#a7c080">Today</text>
+    <text x="330" y="316" fill="#d3c6aa">• Review the draft</text>
+    <text x="330" y="350" fill="#d3c6aa">• Send updated chronology</text>
+    <text x="330" y="384" fill="#d3c6aa">• Prepare questions for Friday</text>
+
+    <text x="330" y="454" font-size="25" font-weight="700" fill="#a7c080">Key decisions</text>
+
+    <g fill="#b7d9a8">
+      <text x="330" y="510">│ Decision          │ Owner │ Status   │</text>
+      <text x="330" y="544">├───────────────────┼───────┼──────────┤</text>
+      <text x="330" y="578">│ Circulate draft   │ Alex  │ Done     │</text>
+      <text x="330" y="612">│ Confirm deadline  │ Sam   │ Pending  │</text>
+    </g>
+
+    <text x="330" y="682" fill="#859289">Markdown remains plain text. Enter a heading or table to reveal its source.</text>
+  </g>
+
+  <rect x="0" y="852" width="1440" height="48" rx="0" fill="#344047"/>
+  <text x="20" y="883" font-family="ui-monospace, monospace" font-size="17" fill="#f0f0f0">meeting-notes.md   Ln 18, Col 1   ~/Documents/notes   Autosaved</text>
+</svg>

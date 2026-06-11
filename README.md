@@ -1,54 +1,67 @@
 # Marko
 
-A calm terminal Markdown editor.
+**A calm, modeless Markdown editor for the terminal.**
 
-Marko uses familiar, modeless editing. It keeps Markdown as plain text,
-styles structure inline, and makes tables less awkward.
+Marko combines Micro-style familiar editing with inline-rendered headings,
+emphasis, and tables. There is no preview pane, no modal editing, no notes
+database, and no workspace to manage. Your files remain ordinary Markdown.
 
-On wide terminals, Marko centers an 88-column writing area by default, giving
-prose a calm Goyo-style layout instead of placing everything against the
-left-hand edge. Narrow panes continue to use the available width.
+![Simulated Marko terminal screenshot](docs/marko-screenshot.svg)
 
-## Use case
+## Why Marko?
 
-Marko is for people who like writing Markdown in the terminal but do not want
-to learn modal editing, use a separate preview pane, or launch a heavyweight
-desktop editor.
+Terminal Markdown tools often make you choose between a plain text editor,
+a separate read-only viewer, or a powerful modal editor with a learning curve.
+Marko fills the smaller gap between them.
 
-It intentionally focuses on the parts of Markdown that provide most of the
-value in everyday notes and documents:
+- Type and navigate normally with arrow keys, mouse, selection, and clipboard
+- Read clean headings, emphasis, and aligned tables in the editable buffer
+- Enter a rendered structure to reveal its ordinary Markdown source
+- Write in a centered, word-wrapped, Goyo-style column
+- Autosave safely, detect external changes, and keep a recovery journal
+- Keep every document portable as a plain `.md` file
 
-- familiar, low-friction text editing
-- undo/redo, search, selection, clipboard, mouse placement, and soft wrapping
-- visually distinct headings
-- clean rendered headings that reveal their Markdown markers when entered
-- rendered bold, italic, and struck-through text that reveals its markers when entered
-- quick table creation and pleasant table editing
-- aligned, rendered tables that reveal their Markdown source when entered
-- ordinary `.md` files that work everywhere
+Marko deliberately avoids becoming an IDE or knowledge-management system. It
+aims to make everyday terminal notes and documents pleasant to write.
 
-Marko is not intended to become an IDE, knowledge-management system, or
-full Markdown previewer. Its aim is to make simple terminal documents easy to
-write and easy to read.
-
-## Start writing
+## Quick Start
 
 ```sh
-# Create a new Markdown document
-marko
-
-# Open or create a named Markdown document
-marko document.md
+marko                 # new dated note in the current directory
+marko document.md     # open or create a named Markdown file
 ```
 
-Running `marko` by itself opens a dated untitled document in the current
-working directory, for example `20261230_untitled.md`. Further new documents
-that day use `_2`, `_3`, and so on, so nothing is overwritten.
+New unnamed notes use `YYYYMMDD_untitled.md`, then `_2`, `_3`, and so on.
+Documents autosave after two idle seconds.
 
-Named files are created automatically if they do not already exist.
-Documents autosave to their normal path after two seconds without typing.
-If another program changes the file, Marko refuses to overwrite it and asks
-you to reopen it or use Save As.
+Press `F1` inside Marko for the complete shortcut overlay.
+
+## Highlights
+
+### Comfortable writing
+
+- Modeless editing with mouse support
+- Centered 88-column writing area on wide terminals
+- Word-aware wrapping and automatic focus mode
+- Four persistent themes: calm, green, mono, and light
+- Recent-file picker with `Ctrl-E`
+
+### Markdown without friction
+
+- Rendered headings, bold, italic, strikethrough, and tables
+- `Ctrl-T` creates a table
+- `Tab` moves through table cells
+- `Enter` adds a row; on an empty final row, it leaves the table
+- Lists, numbered lists, and checkboxes continue automatically
+- `Ctrl-Space` toggles a checkbox
+
+### Editor essentials
+
+- Undo/redo, live search, replace, and replace all
+- Mouse drag, double-click word, and triple-click line selection
+- Typing, Backspace, or Delete replaces/removes selected text
+- Cross-platform clipboard support
+- Save As, rename, reload, external-change protection, and recovery journal
 
 ## Install
 
@@ -62,63 +75,36 @@ Or build from source:
 go install github.com/alexandermacmillan/little-marco@latest
 ```
 
-## Themes
+## Essential Keys
 
-Marko includes four built-in themes:
+| Key | Action |
+|---|---|
+| `F1` | Show shortcut help |
+| `Ctrl-S` / `Ctrl-Shift-S` | Save / Save As |
+| `Ctrl-E` | Open recent Markdown file |
+| `Ctrl-F` / `Ctrl-N` / `Ctrl-P` | Search / next / previous |
+| `Ctrl-R` | Replace current; `Ctrl-A` in prompt replaces all |
+| `Ctrl-Z` / `Ctrl-Y` | Undo / redo |
+| `Ctrl-C` / `Ctrl-X` / `Ctrl-V` | Copy / cut / paste |
+| `Ctrl-T` | Create table |
+| `Ctrl-G` | Cycle theme |
+| `Ctrl-Q` | Quit |
+
+## Themes And Fonts
 
 ```sh
-marko document.md                  # calm, the default
 MARKO_THEME=green marko document.md
 MARKO_THEME=mono marko document.md
 MARKO_THEME=light marko document.md
 ```
 
-Set `MARKO_THEME` in your shell profile to make a theme permanent.
-Press `Ctrl-G` inside Marko to cycle themes. The selected theme is remembered
-for future launches.
+Press `Ctrl-G` to cycle and remember themes. Marko inherits your terminal font;
+for a warmer writing feel, try Berkeley Mono, iA Writer Mono, or Atkinson
+Hyperlegible Mono in your terminal settings.
 
-Marko uses the font configured by your terminal because terminal applications
-cannot select their own fonts. For a warmer, Medium-like writing feel, try
-Berkeley Mono, iA Writer Mono, or Atkinson Hyperlegible Mono in cmux's terminal
-settings.
+## Philosophy
 
-## Keys
-
-- Arrow keys, Home, End, Page Up, Page Down: move
-- Type, Backspace, Delete, Enter: edit normally
-- `Ctrl-T`: create a two-column table at the cursor
-- `F1`: show or hide the shortcut help overlay
-- `Ctrl-E`: open one of the five most recently used Markdown files
-- `Ctrl-L`: reload the current file from disk
-- `Ctrl-D`: delete the current line
-- `Ctrl-G`: cycle and remember the colour theme
-- `Ctrl-Z` / `Ctrl-Y`: undo / redo
-- `Ctrl-F`: live search; matches highlight while typing
-- `Enter` / `Ctrl-N`: next search match
-- `Ctrl-P`: previous search match
-- `Ctrl-R`: replace current match; press `Ctrl-A` in the replacement prompt to replace all
-- `Ctrl-Shift-R`: rename the current file
-- Shift + arrow keys or mouse drag: select text
-- Double-click a word: select it
-- Triple-click a line: select it
-- `Ctrl-C` / `Ctrl-X` / `Ctrl-V`: copy / cut / paste
-- Typing, Backspace, or Delete replaces/removes selected text
-- `Ctrl-Space`: toggle a checkbox on the current line
-- `Ctrl-O`: open a Markdown or web link on the current line
-- `Tab`: insert spaces, or move to the next cell inside a Markdown table
-- `Enter` in a table: add a row; on an empty final row, leave the table
-- `Enter` in a list: continue bullets, checkboxes, or numbered lists
-- `Ctrl-S`: save
-- `Ctrl-Shift-S`: Save As
-- `Ctrl-Q`: quit
-
-Prose wraps at word boundaries. Clipboard commands support macOS, Windows,
-Wayland (`wl-copy` / `wl-paste`), and X11 (`xclip`), with terminal clipboard
-fallback where supported.
-
-After five seconds without input, Marko enters focus mode: the status bar
-disappears and surrounding text becomes quieter. Any key or mouse action exits
-focus mode immediately.
-
-The footer includes the current working directory. Marko also writes a private
-recovery journal before autosaving and removes it after a successful save.
+Marko is intentionally small. It renders the Markdown structures that matter
+most for everyday writing, while leaving the underlying text visible whenever
+you edit it. Features that turn it into an IDE, file manager, or proprietary
+notes system are outside its scope.
