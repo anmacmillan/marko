@@ -11,9 +11,8 @@ to manage. Your files remain ordinary Markdown.
 
 ![Simulated Marko terminal screenshot](docs/marko-screenshot.svg)
 
-The table above is not a preview or a separate pane. Marko dynamically renders
-the Markdown table directly inside the editable terminal buffer. Enter the
-table and the original pipes and separator row reappear for editing.
+The screenshot shows both states: a rendered table in the editor and the raw
+Markdown source that appears when you enter it. There is no preview pane.
 
 ## Why Marko?
 

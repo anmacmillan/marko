@@ -20,14 +20,26 @@
 
     <text x="330" y="454" font-size="25" font-weight="700" fill="#a7c080">Key decisions</text>
 
+    <rect x="330" y="478" width="372" height="180" rx="10" fill="#13191f" stroke="#52605b"/>
+    <text x="350" y="506" fill="#859289">Rendered table</text>
     <g fill="#b7d9a8">
-      <text x="330" y="510">│ Decision          │ Owner │ Status   │</text>
-      <text x="330" y="544">├───────────────────┼───────┼──────────┤</text>
-      <text x="330" y="578">│ Circulate draft   │ Alex  │ Done     │</text>
-      <text x="330" y="612">│ Confirm deadline  │ Sam   │ Pending  │</text>
+      <text x="350" y="542">┌───────────────────┬───────┬──────────┐</text>
+      <text x="350" y="574">│ Decision          │ Owner │ Status   │</text>
+      <text x="350" y="606">├───────────────────┼───────┼──────────┤</text>
+      <text x="350" y="638">│ Circulate draft   │ Alex  │ Done     │</text>
+      <text x="350" y="670">└───────────────────┴───────┴──────────┘</text>
     </g>
 
-    <text x="330" y="682" fill="#859289">Dynamically rendered in the editable buffer. Enter the table to reveal its Markdown source.</text>
+    <rect x="742" y="478" width="372" height="180" rx="10" fill="#13191f" stroke="#52605b"/>
+    <text x="762" y="506" fill="#859289">Enter table to reveal source</text>
+    <g fill="#d3c6aa">
+      <text x="762" y="544">| Decision | Owner | Status |</text>
+      <text x="762" y="578">| --- | --- | --- |</text>
+      <text x="762" y="612">| Circulate draft | Alex | Done |</text>
+      <text x="762" y="646">| Confirm deadline | Sam | Pending |</text>
+    </g>
+
+    <text x="330" y="714" fill="#859289">Tables render inline in the editable buffer; entering the table shows the raw Markdown again.</text>
   </g>
 
   <rect x="0" y="852" width="1440" height="48" rx="0" fill="#344047"/>
