@@ -5,6 +5,24 @@ A calm terminal Markdown editor.
 Marko uses familiar, modeless editing. It keeps Markdown as plain text,
 styles structure inline, and makes tables less awkward.
 
+## Use case
+
+Marko is for people who like writing Markdown in the terminal but do not want
+to learn modal editing, use a separate preview pane, or launch a heavyweight
+desktop editor.
+
+It intentionally focuses on the parts of Markdown that provide most of the
+value in everyday notes and documents:
+
+- familiar, low-friction text editing
+- visually distinct headings
+- quick table creation and pleasant table editing
+- ordinary `.md` files that work everywhere
+
+Marko is not intended to become an IDE, knowledge-management system, or
+full Markdown previewer. Its aim is to make simple terminal documents easy to
+write and easy to read.
+
 ## Run
 
 ```sh
