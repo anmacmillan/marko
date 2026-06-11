@@ -19,14 +19,20 @@ type editor struct {
 	status      string
 	confirmQuit bool
 	preferredX  int
+	prompt      string
+	promptValue string
 }
 
 func main() {
-	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: marco FILE.md")
+	if len(os.Args) > 2 {
+		fmt.Fprintln(os.Stderr, "usage: marko [FILE.md]")
 		os.Exit(2)
 	}
-	e, err := newEditor(os.Args[1])
+	path := ""
+	if len(os.Args) == 2 {
+		path = os.Args[1]
+	}
+	e, err := newEditor(path)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -36,9 +42,13 @@ func main() {
 }
 
 func newEditor(path string) (*editor, error) {
-	data, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return nil, err
+	data := []byte{}
+	if path != "" {
+		var err error
+		data, err = os.ReadFile(path)
+		if err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
 	}
 	text := strings.ReplaceAll(string(data), "\r\n", "\n")
 	lines := strings.Split(text, "\n")
@@ -70,6 +80,10 @@ func (e *editor) run() {
 }
 
 func (e *editor) key(ev *tcell.EventKey) bool {
+	if e.prompt != "" {
+		e.promptKey(ev)
+		return false
+	}
 	switch ev.Key() {
 	case tcell.KeyCtrlQ:
 		if e.dirty && !e.confirmQuit {
@@ -79,7 +93,12 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		}
 		return true
 	case tcell.KeyCtrlS:
-		e.save()
+		if e.path == "" {
+			e.prompt = "Save as: "
+			e.promptValue = "untitled.md"
+		} else {
+			e.save()
+		}
 	case tcell.KeyCtrlT:
 		e.insertTable()
 	case tcell.KeyUp:
@@ -126,6 +145,33 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 	e.confirmQuit = false
 	e.preferredX = e.x
 	return false
+}
+
+func (e *editor) promptKey(ev *tcell.EventKey) {
+	switch ev.Key() {
+	case tcell.KeyEsc:
+		e.prompt, e.promptValue = "", ""
+		e.status = "Save cancelled"
+	case tcell.KeyEnter:
+		path := strings.TrimSpace(e.promptValue)
+		if path == "" {
+			e.status = "Enter a filename"
+			return
+		}
+		if filepath.Ext(path) == "" {
+			path += ".md"
+		}
+		e.path = path
+		e.prompt, e.promptValue = "", ""
+		e.save()
+	case tcell.KeyBackspace, tcell.KeyBackspace2:
+		r := []rune(e.promptValue)
+		if len(r) > 0 {
+			e.promptValue = string(r[:len(r)-1])
+		}
+	case tcell.KeyRune:
+		e.promptValue += string(ev.Rune())
+	}
 }
 
 func (e *editor) insertTable() {
@@ -310,13 +356,23 @@ func (e *editor) draw() {
 		e.drawLine(row, e.lines[y], y == e.y, w)
 	}
 	name := filepath.Base(e.path)
+	if e.path == "" {
+		name = "Untitled"
+	}
 	mark := ""
 	if e.dirty {
 		mark = " *"
 	}
 	status := fmt.Sprintf(" %s%s  Ln %d, Col %d  %s", name, mark, e.y+1, e.x+1, e.status)
+	if e.prompt != "" {
+		status = " " + e.prompt + e.promptValue
+	}
 	e.put(0, h-1, status, tcell.StyleDefault.Background(tcell.ColorDarkSlateGray).Foreground(tcell.ColorWhite), w)
-	e.screen.ShowCursor(e.x, e.y-e.top)
+	if e.prompt != "" {
+		e.screen.ShowCursor(1+runeLen(e.prompt)+runeLen(e.promptValue), h-1)
+	} else {
+		e.screen.ShowCursor(e.x, e.y-e.top)
+	}
 	e.screen.Show()
 }
 

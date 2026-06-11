@@ -29,8 +29,12 @@ write and easy to read.
 ## Run
 
 ```sh
-go run . document.md
+marko
+marko document.md
 ```
+
+Running `marko` without a filename opens an untitled document. Press `Ctrl-S`
+to choose its filename.
 
 ## Keys
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"reflect"
 	"testing"
 
@@ -99,4 +100,13 @@ func TestEmphasisAt(t *testing.T) {
 			_ = style(tcell.StyleDefault)
 		}
 	}
+}
+
+func TestSavePromptAddsMarkdownExtension(t *testing.T) {
+	e := &editor{lines: []string{"hello"}, prompt: "Save as: ", promptValue: "note"}
+	e.promptKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	if e.path != "note.md" {
+		t.Fatalf("path = %q, want note.md", e.path)
+	}
+	_ = os.Remove("note.md")
 }
