@@ -15,39 +15,40 @@ import (
 )
 
 type editor struct {
-	screen      tcell.Screen
-	path        string
-	lines       []string
-	x, y, top   int
-	dirty       bool
-	status      string
-	confirmQuit bool
-	preferredX  int
-	prompt      string
-	promptValue string
-	lastEdit    time.Time
-	recovery    string
-	theme       theme
-	themeName   string
-	undo, redo  []snapshot
-	selecting   bool
-	selX, selY  int
-	mouseDown   bool
-	lastClick   time.Time
-	clickX      int
-	clickY      int
-	clickCount  int
-	search      string
-	replace     string
-	lastAction  time.Time
-	focusMode   bool
-	modTime     time.Time
-	conflict    bool
-	showHelp    bool
-	showRecent  bool
-	recent      []string
-	recentIndex int
-	renameFrom  string
+	screen       tcell.Screen
+	path         string
+	lines        []string
+	x, y, top    int
+	dirty        bool
+	status       string
+	confirmQuit  bool
+	preferredX   int
+	prompt       string
+	promptValue  string
+	lastEdit     time.Time
+	recovery     string
+	theme        theme
+	themeName    string
+	undo, redo   []snapshot
+	selecting    bool
+	selX, selY   int
+	mouseDown    bool
+	lastClick    time.Time
+	clickX       int
+	clickY       int
+	clickCount   int
+	search       string
+	replace      string
+	lastAction   time.Time
+	focusMode    bool
+	manualScroll bool
+	modTime      time.Time
+	conflict     bool
+	showHelp     bool
+	showRecent   bool
+	recent       []string
+	recentIndex  int
+	renameFrom   string
 }
 
 type snapshot struct {
@@ -243,7 +244,7 @@ func (e *editor) run() {
 			e.autosave()
 			e.focusMode = time.Since(e.lastAction) >= 5*time.Second
 		case *tcell.EventKey:
-			e.lastAction, e.focusMode = time.Now(), false
+			e.lastAction, e.focusMode, e.manualScroll = time.Now(), false, false
 			if e.key(ev) {
 				return
 			}
@@ -257,6 +258,24 @@ func (e *editor) run() {
 }
 
 func (e *editor) mouse(ev *tcell.EventMouse) {
+	buttons := ev.Buttons()
+	if buttons&(tcell.WheelUp|tcell.WheelDown|tcell.Button4|tcell.Button5) != 0 {
+		w, h := e.screen.Size()
+		bodyH := max(1, h-1)
+		if e.focusMode {
+			bodyH = h
+		}
+		_, contentWidth := writingArea(w)
+		rows := e.visualRows(contentWidth)
+		switch {
+		case buttons&(tcell.WheelUp|tcell.Button4) != 0:
+			e.scrollBy(-3, bodyH, len(rows))
+		case buttons&(tcell.WheelDown|tcell.Button5) != 0:
+			e.scrollBy(3, bodyH, len(rows))
+		}
+		return
+	}
+	e.manualScroll = false
 	x, sy := ev.Position()
 	w, h := e.screen.Size()
 	if sy >= h-1 {
@@ -267,7 +286,7 @@ func (e *editor) mouse(ev *tcell.EventMouse) {
 	index := min(len(rows)-1, max(0, e.top+sy))
 	y := rows[index].y
 	x = min(runeLen(e.lines[y]), max(0, rows[index].start+x-left))
-	if ev.Buttons()&tcell.Button1 != 0 {
+	if buttons&tcell.Button1 != 0 {
 		if time.Since(e.lastClick) < 400*time.Millisecond && e.clickX == x && e.clickY == y {
 			e.clickCount++
 		} else {
@@ -291,11 +310,20 @@ func (e *editor) mouse(ev *tcell.EventMouse) {
 		}
 		e.x, e.y = x, y
 		e.selecting = e.selX != e.x || e.selY != e.y
-	} else if e.mouseDown && ev.Buttons() == tcell.ButtonNone {
+	} else if e.mouseDown {
+		if x == e.x && y == e.y {
+			e.mouseDown = false
+			return
+		}
 		e.x, e.y = x, y
 		e.selecting = e.selX != e.x || e.selY != e.y
-		e.mouseDown = false
 	}
+}
+
+func (e *editor) scrollBy(delta, bodyH, rowCount int) {
+	maxTop := max(0, rowCount-bodyH)
+	e.top = min(max(e.top+delta, 0), maxTop)
+	e.manualScroll = true
 }
 
 func (e *editor) selectLineAt(y int) {
@@ -1204,15 +1232,19 @@ func (e *editor) draw() {
 	}
 	rows := e.visualRows(contentWidth)
 	cursorRow := e.cursorVisualRow(rows)
-	if cursorRow < e.top {
-		e.top = cursorRow
+	if !e.manualScroll {
+		if cursorRow < e.top {
+			e.top = cursorRow
+		}
+		if cursorRow >= e.top+bodyH {
+			e.top = cursorRow - bodyH + 1
+		}
 	}
-	if cursorRow >= e.top+bodyH {
-		e.top = cursorRow - bodyH + 1
-	}
+	maxTop := max(0, len(rows)-bodyH)
+	e.top = min(max(e.top, 0), maxTop)
 	for row := 0; row < bodyH && e.top+row < len(rows); row++ {
 		vr := rows[e.top+row]
-		e.drawVisualLine(left, row, vr, vr.y == e.y, contentWidth)
+		e.drawVisualLine(left, row, vr, e.focusedLine(vr.y), contentWidth)
 	}
 	name := filepath.Base(e.path)
 	if e.path == "" {
@@ -1240,9 +1272,30 @@ func (e *editor) draw() {
 		e.screen.ShowCursor(1+runeLen(e.prompt)+runeLen(e.promptValue), h-1)
 	} else {
 		vr := rows[cursorRow]
-		e.screen.ShowCursor(left+e.x-vr.start, cursorRow-e.top)
+		if cursorRow >= e.top && cursorRow < e.top+bodyH {
+			e.screen.ShowCursor(left+e.x-vr.start, cursorRow-e.top)
+		} else {
+			e.screen.HideCursor()
+		}
 	}
 	e.screen.Show()
+}
+
+func (e *editor) focusedLine(y int) bool {
+	if !e.focusMode {
+		return y == e.y
+	}
+	if strings.TrimSpace(e.lines[e.y]) == "" {
+		return y == e.y
+	}
+	start, end := e.y, e.y
+	for start > 0 && strings.TrimSpace(e.lines[start-1]) != "" {
+		start--
+	}
+	for end+1 < len(e.lines) && strings.TrimSpace(e.lines[end+1]) != "" {
+		end++
+	}
+	return y >= start && y <= end
 }
 
 func (e *editor) drawHelp(w, h int) {

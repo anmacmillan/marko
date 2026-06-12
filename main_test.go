@@ -157,6 +157,40 @@ func TestVisualRowsWrapAndMap(t *testing.T) {
 	}
 }
 
+func TestFocusedLineUsesCurrentParagraph(t *testing.T) {
+	e := &editor{
+		lines:     []string{"first", "", "current one", "current two", "", "last"},
+		y:         3,
+		focusMode: true,
+	}
+	for y, want := range []bool{false, false, true, true, false, false} {
+		if got := e.focusedLine(y); got != want {
+			t.Fatalf("focusedLine(%d) = %t, want %t", y, got, want)
+		}
+	}
+
+	e.y = 1
+	if !e.focusedLine(1) || e.focusedLine(0) || e.focusedLine(2) {
+		t.Fatal("a blank current line should focus only itself")
+	}
+}
+
+func TestScrollByClampsTop(t *testing.T) {
+	e := &editor{top: 4}
+	e.scrollBy(3, 5, 20)
+	if e.top != 7 || !e.manualScroll {
+		t.Fatalf("scrollBy() = top %d manualScroll %t", e.top, e.manualScroll)
+	}
+	e.scrollBy(50, 5, 20)
+	if e.top != 15 {
+		t.Fatalf("scrollBy clamp down = %d, want 15", e.top)
+	}
+	e.scrollBy(-100, 5, 20)
+	if e.top != 0 {
+		t.Fatalf("scrollBy clamp up = %d, want 0", e.top)
+	}
+}
+
 func TestUndoRedo(t *testing.T) {
 	e := &editor{lines: []string{"a"}, x: 1}
 	e.checkpoint()
