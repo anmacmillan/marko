@@ -326,6 +326,18 @@ func (e *editor) scrollBy(delta, bodyH, rowCount int) {
 	e.manualScroll = true
 }
 
+func (e *editor) pageScroll(delta int) {
+	w, h := e.screen.Size()
+	bodyH := max(1, h-1)
+	if e.focusMode {
+		bodyH = h
+	}
+	_, contentWidth := writingArea(w)
+	rows := e.visualRows(contentWidth)
+	step := max(1, bodyH-1)
+	e.scrollBy(delta*step, bodyH, len(rows))
+}
+
 func (e *editor) selectLineAt(y int) {
 	e.selX, e.selY = 0, y
 	e.x, e.y = runeLen(e.lines[y]), y
@@ -468,11 +480,9 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 	case tcell.KeyEnd:
 		e.x = runeLen(e.lines[e.y])
 	case tcell.KeyPgUp:
-		e.y = max(0, e.y-10)
-		e.clampX()
+		e.pageScroll(-1)
 	case tcell.KeyPgDn:
-		e.y = min(len(e.lines)-1, e.y+10)
-		e.clampX()
+		e.pageScroll(1)
 	case tcell.KeyBackspace, tcell.KeyBackspace2:
 		e.checkpoint()
 		if e.selecting {
