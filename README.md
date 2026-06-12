@@ -25,6 +25,8 @@ Marko fills the smaller gap between them.
   the editable terminal buffer
 - Enter any rendered structure to reveal and edit its ordinary Markdown source
 - Write in a centered, word-wrapped, Goyo-style column
+- Focus mode highlights the whole current paragraph instead of just one line
+- Trackpad and mouse-wheel scrolling move the viewport naturally
 - Autosave safely, detect external changes, and keep a recovery journal
 - Keep every document portable as a plain `.md` file
 
@@ -49,7 +51,8 @@ Press `F1` inside Marko for the complete shortcut overlay.
 
 - Modeless editing with mouse support
 - Centered 88-column writing area on wide terminals
-- Word-aware wrapping and automatic focus mode
+- Word-aware wrapping and paragraph-based focus mode
+- Mouse-wheel and trackpad scrolling
 - Four persistent themes: calm, green, mono, and light
 - Recent-file picker with `Ctrl-E`
 
