@@ -86,6 +86,8 @@ Respondent offer: 70000
 ````
 
 Marko renders the range while reading and reveals the source when editing it.
+Typing `` ```zopa `` and pressing Enter inserts the complete example above.
+Press Tab to move through its four values.
 
 ### Editor essentials
 
