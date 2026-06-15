@@ -349,6 +349,59 @@ func TestRenderedBlockQuoteHidesMarker(t *testing.T) {
 	}
 }
 
+func TestZOPABlockRendersOutsideFence(t *testing.T) {
+	e := &editor{
+		lines: []string{
+			"```zopa",
+			"Claimant target: 100000",
+			"Claimant minimum: 80000",
+			"Respondent maximum: 95000",
+			"Respondent offer: 70000",
+			"```",
+			"",
+		},
+		y: 6,
+	}
+	rows := e.visualRows(70)
+	if got, want := len(rows), 5; got != want {
+		t.Fatalf("visualRows() = %d rows, want %d", got, want)
+	}
+	if got, want := rows[0].text, "Settlement range · ZOPA £80k–£95k"; got != want {
+		t.Fatalf("ZOPA heading = %q, want %q", got, want)
+	}
+	if !strings.Contains(rows[1].text, "═") {
+		t.Fatalf("ZOPA axis has no overlap marker: %q", rows[1].text)
+	}
+}
+
+func TestZOPABlockShowsSourceWhileEditing(t *testing.T) {
+	e := &editor{
+		lines: []string{
+			"```zopa",
+			"Claimant target: 100000",
+			"Claimant minimum: 80000",
+			"Respondent maximum: 95000",
+			"Respondent offer: 70000",
+			"```",
+		},
+		y: 2,
+	}
+	rows := e.visualRows(70)
+	if got, want := len(rows), 6; got != want {
+		t.Fatalf("editing visualRows() = %d rows, want %d", got, want)
+	}
+	if rows[0].text != "```zopa" {
+		t.Fatalf("editing first row = %q", rows[0].text)
+	}
+}
+
+func TestZOPANoOverlap(t *testing.T) {
+	lines := renderZOPA(zopaChart{claimantTarget: 120000, claimantMinimum: 100000, respondentMaximum: 90000, respondentOffer: 70000}, 70)
+	if got, want := lines[0], "Settlement range · No ZOPA"; got != want {
+		t.Fatalf("no-overlap heading = %q, want %q", got, want)
+	}
+}
+
 func TestEmphasisAt(t *testing.T) {
 	tests := []struct {
 		text       string

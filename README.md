@@ -66,12 +66,26 @@ Press `F1` inside Marko for the complete shortcut overlay.
 - Tables dynamically render as aligned terminal tables, then reveal their
   Markdown pipes when entered
 - Headings, bold, italic, and strikethrough follow the same reveal-on-edit model
+- `zopa` fenced blocks render settlement overlap as compact range charts
 - Everything happens inside the editable buffer, never in a preview pane
 - `Ctrl-T` creates a table
 - `Tab` moves through table cells
 - `Enter` adds a row; on an empty final row, it leaves the table
 - Lists, numbered lists, and checkboxes continue automatically
 - `Ctrl-Space` toggles a checkbox
+
+### Settlement range charts
+
+````markdown
+```zopa
+Claimant target: 100000
+Claimant minimum: 80000
+Respondent maximum: 95000
+Respondent offer: 70000
+```
+````
+
+Marko renders the range while reading and reveals the source when editing it.
 
 ### Editor essentials
 
