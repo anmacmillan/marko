@@ -1010,6 +1010,9 @@ func (e *editor) delete() {
 }
 
 func (e *editor) enter() {
+	if e.expandChartFence() {
+		return
+	}
 	if e.inTable(e.y) {
 		_, end := e.tableBounds(e.y)
 		if e.y == end && tableRowEmpty(e.lines[e.y]) {
@@ -1036,6 +1039,31 @@ func (e *editor) enter() {
 	e.y++
 	e.x = runeLen(prefix)
 	e.dirty = true
+}
+
+func (e *editor) expandChartFence() bool {
+	name := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(e.lines[e.y]), "```"))
+	template, ok := chartTemplates[name]
+	if !ok || strings.TrimSpace(e.lines[e.y]) != "```"+name {
+		return false
+	}
+	lines := append([]string(nil), template...)
+	e.lines = append(e.lines[:e.y+1], append(lines, e.lines[e.y+1:]...)...)
+	e.y++
+	e.x = runeLen("Claimant target: ")
+	e.dirty = true
+	e.status = "Chart created. Edit the example values, then press Tab."
+	return true
+}
+
+var chartTemplates = map[string][]string{
+	"zopa": {
+		"Claimant target: 100000",
+		"Claimant minimum: 80000",
+		"Respondent maximum: 95000",
+		"Respondent offer: 70000",
+		"```",
+	},
 }
 
 func tableRowEmpty(line string) bool {
@@ -1117,6 +1145,9 @@ func (e *editor) openLink() {
 }
 
 func (e *editor) nextTableCell() bool {
+	if e.nextChartValue() {
+		return true
+	}
 	if !e.inTable(e.y) {
 		return false
 	}
@@ -1142,6 +1173,44 @@ func (e *editor) nextTableCell() bool {
 	e.y, e.x = end+1, 2
 	e.formatTable()
 	return true
+}
+
+func (e *editor) nextChartValue() bool {
+	start, end, ok := e.chartFenceBounds(e.y)
+	if !ok {
+		return false
+	}
+	next := e.y + 1
+	if e.y == start || next >= end {
+		next = start + 1
+	}
+	e.y = next
+	if colon := strings.Index(e.lines[e.y], ":"); colon >= 0 {
+		e.x = colon + 2
+	} else {
+		e.x = runeLen(e.lines[e.y])
+	}
+	return true
+}
+
+func (e *editor) chartFenceBounds(y int) (int, int, bool) {
+	start := y
+	for start >= 0 && !strings.HasPrefix(strings.TrimSpace(e.lines[start]), "```") {
+		start--
+	}
+	if start < 0 {
+		return 0, 0, false
+	}
+	name := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(e.lines[start]), "```"))
+	if _, ok := chartTemplates[name]; !ok {
+		return 0, 0, false
+	}
+	for end := start + 1; end < len(e.lines); end++ {
+		if strings.TrimSpace(e.lines[end]) == "```" {
+			return start, end, true
+		}
+	}
+	return 0, 0, false
 }
 
 func (e *editor) inTable(y int) bool {

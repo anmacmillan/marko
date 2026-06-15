@@ -402,6 +402,60 @@ func TestZOPANoOverlap(t *testing.T) {
 	}
 }
 
+func TestEnterExpandsZOPAChartWithExampleValues(t *testing.T) {
+	e := &editor{lines: []string{"```zopa", ""}, x: 7}
+	e.enter()
+	want := []string{
+		"```zopa",
+		"Claimant target: 100000",
+		"Claimant minimum: 80000",
+		"Respondent maximum: 95000",
+		"Respondent offer: 70000",
+		"```",
+		"",
+	}
+	if !reflect.DeepEqual(e.lines, want) {
+		t.Fatalf("expanded ZOPA = %#v, want %#v", e.lines, want)
+	}
+	if e.y != 1 || e.x != runeLen("Claimant target: ") {
+		t.Fatalf("cursor = (%d,%d)", e.x, e.y)
+	}
+}
+
+func TestEnterDoesNotExpandUnsupportedFence(t *testing.T) {
+	e := &editor{lines: []string{"```mermaid"}, x: 10}
+	e.enter()
+	if got, want := e.lines, []string{"```mermaid", ""}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("unsupported fence = %#v, want %#v", got, want)
+	}
+}
+
+func TestTabMovesThroughZOPAValues(t *testing.T) {
+	e := &editor{
+		lines: []string{
+			"```zopa",
+			"Claimant target: 100000",
+			"Claimant minimum: 80000",
+			"Respondent maximum: 95000",
+			"Respondent offer: 70000",
+			"```",
+		},
+		y: 1,
+		x: 17,
+	}
+	for _, wantY := range []int{2, 3, 4, 1} {
+		if !e.nextTableCell() {
+			t.Fatal("Tab did not handle ZOPA chart")
+		}
+		if e.y != wantY {
+			t.Fatalf("Tab y = %d, want %d", e.y, wantY)
+		}
+		if e.x != strings.Index(e.lines[e.y], ":")+2 {
+			t.Fatalf("Tab x = %d on line %q", e.x, e.lines[e.y])
+		}
+	}
+}
+
 func TestEmphasisAt(t *testing.T) {
 	tests := []struct {
 		text       string
