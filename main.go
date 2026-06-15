@@ -61,6 +61,10 @@ type visualRow struct {
 	text     string
 }
 
+type zopaChart struct {
+	claimantTarget, claimantMinimum, respondentMaximum, respondentOffer int
+}
+
 type theme struct {
 	text, heading1, heading2, heading3, table, quote, background, statusBG, statusFG tcell.Color
 }
@@ -1458,7 +1462,15 @@ func (e *editor) drawRecent(w, h int) {
 
 func (e *editor) visualRows(width int) []visualRow {
 	rows := []visualRow{}
-	for y, line := range e.lines {
+	for y := 0; y < len(e.lines); y++ {
+		line := e.lines[y]
+		if chart, end, ok := e.zopaBlock(y); ok && (e.y < y || e.y > end) {
+			for _, text := range renderZOPA(chart, width) {
+				rows = append(rows, visualRow{y: y, text: text})
+			}
+			y = end
+			continue
+		}
 		if e.inTable(y) && !e.cursorInSameTable(y) {
 			rows = append(rows, visualRow{y: y, text: e.renderTableLine(y, width)})
 			continue
@@ -1488,6 +1500,71 @@ func (e *editor) visualRows(width int) []visualRow {
 		}
 	}
 	return rows
+}
+
+func (e *editor) zopaBlock(start int) (zopaChart, int, bool) {
+	if start < 0 || start >= len(e.lines) || strings.TrimSpace(e.lines[start]) != "```zopa" {
+		return zopaChart{}, start, false
+	}
+	values := map[string]int{}
+	for end := start + 1; end < len(e.lines); end++ {
+		line := strings.TrimSpace(e.lines[end])
+		if line == "```" {
+			chart := zopaChart{
+				claimantTarget:    values["claimant target"],
+				claimantMinimum:   values["claimant minimum"],
+				respondentMaximum: values["respondent maximum"],
+				respondentOffer:   values["respondent offer"],
+			}
+			ok := chart.claimantTarget > 0 && chart.claimantMinimum > 0 && chart.respondentMaximum > 0 && chart.respondentOffer > 0
+			return chart, end, ok
+		}
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		number := strings.NewReplacer("£", "", ",", "", "_", "", " ", "").Replace(value)
+		if parsed, err := strconv.Atoi(number); err == nil {
+			values[strings.ToLower(strings.TrimSpace(key))] = parsed
+		}
+	}
+	return zopaChart{}, start, false
+}
+
+func renderZOPA(chart zopaChart, width int) []string {
+	minValue := min(chart.respondentOffer, chart.claimantMinimum)
+	maxValue := max(chart.claimantTarget, chart.respondentMaximum)
+	barWidth := max(20, min(width-2, 68))
+	position := func(value int) int {
+		if maxValue == minValue {
+			return 0
+		}
+		return (value - minValue) * (barWidth - 1) / (maxValue - minValue)
+	}
+	axis := []rune(strings.Repeat("─", barWidth))
+	for _, value := range []int{chart.respondentOffer, chart.claimantMinimum, chart.respondentMaximum, chart.claimantTarget} {
+		axis[position(value)] = '┼'
+	}
+	zopaStart, zopaEnd := position(chart.claimantMinimum), position(chart.respondentMaximum)
+	if zopaStart <= zopaEnd {
+		for x := zopaStart + 1; x < zopaEnd; x++ {
+			axis[x] = '═'
+		}
+	}
+	overlap := "No ZOPA"
+	if chart.claimantMinimum <= chart.respondentMaximum {
+		overlap = fmt.Sprintf("ZOPA %s–%s", money(chart.claimantMinimum), money(chart.respondentMaximum))
+	}
+	return []string{
+		"Settlement range · " + overlap,
+		string(axis),
+		fmt.Sprintf("R offer %s   R max %s", money(chart.respondentOffer), money(chart.respondentMaximum)),
+		fmt.Sprintf("C minimum %s   C target %s", money(chart.claimantMinimum), money(chart.claimantTarget)),
+	}
+}
+
+func money(value int) string {
+	return "£" + strconv.Itoa(value/1000) + "k"
 }
 
 func (e *editor) cursorVisualRow(rows []visualRow) int {
