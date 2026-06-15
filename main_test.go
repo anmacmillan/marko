@@ -224,6 +224,43 @@ func TestJamesDeanAwardTableRendersStyledAndAligned(t *testing.T) {
 	}
 }
 
+func TestFullDrawPipelineRendersBoldTableRows(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(88, 10)
+	e := &editor{
+		screen: screen,
+		lines: []string{
+			"| Head | Realistic award |",
+			"| --- | --- |",
+			"| Basic award | £1,057 |",
+			"| **Sub-total** | **£236,304** |",
+			"| **Gross** | **£231,304** |",
+			"| **Total gross** | **~£251,000** |",
+			"",
+		},
+		y:     6,
+		theme: themeByName("calm"),
+	}
+	rows := e.visualRows(88)
+	for row, vr := range rows {
+		e.drawVisualLine(0, row, vr, false, 88)
+	}
+	wantBorders := tableBorderPositions(simulationLine(screen, 0, 88))
+	for y := 2; y < 6; y++ {
+		line := simulationLine(screen, y, 88)
+		if strings.Contains(line, "**") {
+			t.Fatalf("full draw row %d exposed bold markers: %q", y, line)
+		}
+		if got := tableBorderPositions(line); !reflect.DeepEqual(got, wantBorders) {
+			t.Fatalf("full draw row %d borders = %v, want %v: %q", y, got, wantBorders, line)
+		}
+	}
+}
+
 func tableBorderPositions(line string) []int {
 	var positions []int
 	for x, r := range []rune(line) {

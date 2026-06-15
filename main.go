@@ -1484,6 +1484,10 @@ func (e *editor) cursorVisualRow(rows []visualRow) int {
 }
 
 func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width int) {
+	if e.inTable(vr.y) && !e.cursorInSameTable(vr.y) {
+		e.drawLine(left, row, vr.y, e.lines[vr.y], current, width)
+		return
+	}
 	if vr.start == 0 && runeLen(vr.text) == runeLen(e.lines[vr.y]) {
 		e.drawLine(left, row, vr.y, vr.text, current, width)
 		return
