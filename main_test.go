@@ -138,6 +138,60 @@ func TestRenderedTableAppliesBoldStyle(t *testing.T) {
 	if attrs&tcell.AttrBold == 0 {
 		t.Fatal("bold table cell did not receive bold style")
 	}
+	if got := simulationLine(screen, 0, 40); got != "│ Sub-total │ £236,304 │                " {
+		t.Fatalf("rendered bold table row = %q", got)
+	}
+}
+
+func TestRenderedBoldTableKeepsBordersAligned(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(64, 6)
+	e := &editor{
+		screen: screen,
+		lines: []string{
+			"| Head | Realistic award |",
+			"| --- | --- |",
+			"| Basic award | £1,057 |",
+			"| **Sub-total** | **£236,304** |",
+			"| **Gross** | **£231,304** |",
+			"",
+		},
+		y:     5,
+		theme: themeByName("calm"),
+	}
+	for y := 0; y < 5; y++ {
+		e.drawLine(0, y, y, e.lines[y], false, 64)
+	}
+	wantBorders := tableBorderPositions(simulationLine(screen, 0, 64))
+	for _, row := range []int{2, 3, 4} {
+		line := simulationLine(screen, row, 64)
+		if got := tableBorderPositions(line); !reflect.DeepEqual(got, wantBorders) {
+			t.Fatalf("row %d borders = %v, want %v: %q", row, got, wantBorders, line)
+		}
+	}
+}
+
+func tableBorderPositions(line string) []int {
+	var positions []int
+	for x, r := range []rune(line) {
+		if r == '│' {
+			positions = append(positions, x)
+		}
+	}
+	return positions
+}
+
+func simulationLine(screen tcell.SimulationScreen, y, width int) string {
+	runes := make([]rune, width)
+	for x := 0; x < width; x++ {
+		mainc, _, _, _ := screen.GetContent(x, y)
+		runes[x] = mainc
+	}
+	return string(runes)
 }
 
 func TestTruncateInlineCellProducesCleanText(t *testing.T) {

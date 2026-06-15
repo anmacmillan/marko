@@ -1502,8 +1502,8 @@ func (e *editor) drawLine(left, row, y int, line string, current bool, width int
 	}
 	trimmed := strings.TrimSpace(line)
 	if e.inTable(y) && !e.cursorInSameTable(y) {
-		line = e.renderTableLine(y, width)
-		style = style.Foreground(e.theme.table)
+		e.drawTableLine(left, row, y, width, style.Foreground(e.theme.table))
+		return
 	}
 	if level, text, ok := heading(line); ok && !current {
 		line = text
@@ -1594,19 +1594,7 @@ func (e *editor) cursorInSameTable(y int) bool {
 }
 
 func (e *editor) renderTableLine(y int, maxWidths ...int) string {
-	start, end := e.tableBounds(y)
-	widths := []int{}
-	for lineY := start; lineY <= end; lineY++ {
-		if isSeparator(e.lines[lineY]) {
-			continue
-		}
-		for col, cell := range splitTable(e.lines[lineY]) {
-			for len(widths) <= col {
-				widths = append(widths, 3)
-			}
-			widths[col] = max(widths[col], inlineDisplayWidth(cell))
-		}
-	}
+	widths := e.tableWidths(y)
 	if len(maxWidths) > 0 {
 		widths = fitTableWidths(widths, maxWidths[0])
 	}
@@ -1629,6 +1617,50 @@ func (e *editor) renderTableLine(y int, maxWidths ...int) string {
 		parts[col] = " " + value + strings.Repeat(" ", width-inlineDisplayWidth(value)+1)
 	}
 	return "│" + strings.Join(parts, "│") + "│"
+}
+
+func (e *editor) drawTableLine(left, row, y, maxWidth int, style tcell.Style) {
+	widths := fitTableWidths(e.tableWidths(y), maxWidth)
+	if isSeparator(e.lines[y]) {
+		e.put(left, row, e.renderTableLine(y, maxWidth), style, left+maxWidth)
+		return
+	}
+
+	cells := splitTable(e.lines[y])
+	x := left
+	e.screen.SetContent(x, row, '│', nil, style)
+	x++
+	for col, width := range widths {
+		e.screen.SetContent(x, row, ' ', nil, style)
+		x++
+		value := ""
+		if col < len(cells) {
+			value = truncateInlineCell(cells[col], width)
+		}
+		e.putInline(x, row, value, style, x+width)
+		x += width
+		e.screen.SetContent(x, row, ' ', nil, style)
+		x++
+		e.screen.SetContent(x, row, '│', nil, style)
+		x++
+	}
+}
+
+func (e *editor) tableWidths(y int) []int {
+	start, end := e.tableBounds(y)
+	widths := []int{}
+	for lineY := start; lineY <= end; lineY++ {
+		if isSeparator(e.lines[lineY]) {
+			continue
+		}
+		for col, cell := range splitTable(e.lines[lineY]) {
+			for len(widths) <= col {
+				widths = append(widths, 3)
+			}
+			widths[col] = max(widths[col], inlineDisplayWidth(cell))
+		}
+	}
+	return widths
 }
 
 func fitTableWidths(widths []int, maxWidth int) []int {
