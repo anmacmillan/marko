@@ -175,6 +175,55 @@ func TestRenderedBoldTableKeepsBordersAligned(t *testing.T) {
 	}
 }
 
+func TestJamesDeanAwardTableRendersStyledAndAligned(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(88, 20)
+	e := &editor{
+		screen: screen,
+		lines: []string{
+			"| Head | Realistic award |",
+			"| --- | --- |",
+			"| Basic award | £1,057 |",
+			"| Past loss (net of UC mitigation) | £48,839 |",
+			"| Future loss (3 years net) | £51,067 |",
+			"| Pension loss (past + 3yr future) | £22,968 |",
+			"| BUPA + benefits | £27,373 |",
+			"| Loss of statutory rights | £600 |",
+			"| PTSD PSLA (moderately severe, 18th ed. JCG) | £44,000 |",
+			"| Injury to feelings (upper Vento) | £36,400 |",
+			"| Aggravated damages | £4,000 |",
+			"| **Sub-total** | **£236,304** |",
+			"| Less Polkey (30% on UD-attributable loss only) | (£10,500) |",
+			"| Plus ACAS uplift (10%) | £14,500 |",
+			"| **Gross** | **£231,304** |",
+			"| Plus interest (~3yr at 8%) | £20,000 |",
+			"| **Total gross** | **~£251,000** |",
+			"",
+		},
+		y:     17,
+		theme: themeByName("calm"),
+	}
+	for y := 0; y < 17; y++ {
+		e.drawLine(0, y, y, e.lines[y], false, 88)
+	}
+	wantBorders := tableBorderPositions(simulationLine(screen, 0, 88))
+	for y := 2; y < 17; y++ {
+		if got := tableBorderPositions(simulationLine(screen, y, 88)); !reflect.DeepEqual(got, wantBorders) {
+			t.Fatalf("row %d borders = %v, want %v: %q", y, got, wantBorders, simulationLine(screen, y, 88))
+		}
+	}
+	for _, y := range []int{11, 14, 16} {
+		line := simulationLine(screen, y, 88)
+		if strings.Contains(line, "**") {
+			t.Fatalf("row %d exposed bold markers: %q", y, line)
+		}
+	}
+}
+
 func tableBorderPositions(line string) []int {
 	var positions []int
 	for x, r := range []rune(line) {
