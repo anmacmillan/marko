@@ -15,39 +15,40 @@ import (
 )
 
 type editor struct {
-	screen      tcell.Screen
-	path        string
-	lines       []string
-	x, y, top   int
-	dirty       bool
-	status      string
-	confirmQuit bool
-	preferredX  int
-	prompt      string
-	promptValue string
-	lastEdit    time.Time
-	recovery    string
-	theme       theme
-	themeName   string
-	undo, redo  []snapshot
-	selecting   bool
-	selX, selY  int
-	mouseDown   bool
-	lastClick   time.Time
-	clickX      int
-	clickY      int
-	clickCount  int
-	search      string
-	replace     string
-	lastAction  time.Time
-	focusMode   bool
-	modTime     time.Time
-	conflict    bool
-	showHelp    bool
-	showRecent  bool
-	recent      []string
-	recentIndex int
-	renameFrom  string
+	screen       tcell.Screen
+	path         string
+	lines        []string
+	x, y, top    int
+	dirty        bool
+	status       string
+	confirmQuit  bool
+	preferredX   int
+	prompt       string
+	promptValue  string
+	lastEdit     time.Time
+	recovery     string
+	theme        theme
+	themeName    string
+	undo, redo   []snapshot
+	selecting    bool
+	selX, selY   int
+	mouseDown    bool
+	lastClick    time.Time
+	clickX       int
+	clickY       int
+	clickCount   int
+	search       string
+	replace      string
+	lastAction   time.Time
+	focusMode    bool
+	manualScroll bool
+	modTime      time.Time
+	conflict     bool
+	showHelp     bool
+	showRecent   bool
+	recent       []string
+	recentIndex  int
+	renameFrom   string
 }
 
 type snapshot struct {
@@ -243,7 +244,7 @@ func (e *editor) run() {
 			e.autosave()
 			e.focusMode = time.Since(e.lastAction) >= 5*time.Second
 		case *tcell.EventKey:
-			e.lastAction, e.focusMode = time.Now(), false
+			e.lastAction, e.focusMode, e.manualScroll = time.Now(), false, false
 			if e.key(ev) {
 				return
 			}
@@ -257,6 +258,26 @@ func (e *editor) run() {
 }
 
 func (e *editor) mouse(ev *tcell.EventMouse) {
+	buttons := ev.Buttons()
+	if buttons&(tcell.WheelUp|tcell.WheelDown|tcell.Button4|tcell.Button5) != 0 {
+		w, h := e.screen.Size()
+		bodyH := max(1, h-1)
+		if e.focusMode {
+			bodyH = h
+		}
+		_, contentWidth := writingArea(w)
+		rows := e.visualRows(contentWidth)
+		switch {
+		case buttons&(tcell.WheelUp|tcell.Button4) != 0:
+			e.scrollBy(-1, bodyH, len(rows))
+		case buttons&(tcell.WheelDown|tcell.Button5) != 0:
+			e.scrollBy(1, bodyH, len(rows))
+		}
+		return
+	}
+	if buttons&tcell.Button1 != 0 {
+		e.manualScroll = false
+	}
 	x, sy := ev.Position()
 	w, h := e.screen.Size()
 	if sy >= h-1 {
@@ -267,7 +288,7 @@ func (e *editor) mouse(ev *tcell.EventMouse) {
 	index := min(len(rows)-1, max(0, e.top+sy))
 	y := rows[index].y
 	x = min(runeLen(e.lines[y]), max(0, rows[index].start+x-left))
-	if ev.Buttons()&tcell.Button1 != 0 {
+	if buttons&tcell.Button1 != 0 {
 		if time.Since(e.lastClick) < 400*time.Millisecond && e.clickX == x && e.clickY == y {
 			e.clickCount++
 		} else {
@@ -291,11 +312,89 @@ func (e *editor) mouse(ev *tcell.EventMouse) {
 		}
 		e.x, e.y = x, y
 		e.selecting = e.selX != e.x || e.selY != e.y
-	} else if e.mouseDown && ev.Buttons() == tcell.ButtonNone {
+	} else if e.mouseDown {
+		if x == e.x && y == e.y {
+			e.mouseDown = false
+			return
+		}
 		e.x, e.y = x, y
 		e.selecting = e.selX != e.x || e.selY != e.y
-		e.mouseDown = false
 	}
+}
+
+func (e *editor) scrollBy(delta, bodyH, rowCount int) {
+	maxTop := manualScrollMaxTop(rowCount)
+	e.top = min(max(e.top+delta, 0), maxTop)
+	e.manualScroll = true
+}
+
+func manualScrollMaxTop(rowCount int) int {
+	return max(0, rowCount-1)
+}
+
+func (e *editor) pageScroll(delta int) {
+	w, h := 80, 1
+	if e.screen != nil {
+		w, h = e.screen.Size()
+	}
+	bodyH := max(1, h-1)
+	if e.focusMode {
+		bodyH = h
+	}
+	_, contentWidth := writingArea(w)
+	rows := e.visualRows(contentWidth)
+	step := max(1, bodyH-1)
+	e.scrollBy(delta*step, bodyH, len(rows))
+}
+
+func (e *editor) movePageVisual(delta int) {
+	w, h := 80, 1
+	if e.screen != nil {
+		w, h = e.screen.Size()
+	}
+	bodyH := max(1, h-1)
+	if e.focusMode {
+		bodyH = h
+	}
+	_, contentWidth := writingArea(w)
+	rows := e.visualRows(contentWidth)
+	if len(rows) == 0 {
+		return
+	}
+	current := e.cursorVisualRow(rows)
+	target := max(0, min(len(rows)-1, current+delta*max(1, bodyH-1)))
+	column := e.x - rows[current].start
+	if column < 0 {
+		column = 0
+	}
+	vr := rows[target]
+	e.y = vr.y
+	e.x = min(runeLen(e.lines[e.y]), vr.start+column)
+	e.clampX()
+}
+
+func (e *editor) moveLineEdge(end bool) {
+	w := 80
+	if e.screen != nil {
+		w, _ = e.screen.Size()
+	}
+	_, contentWidth := writingArea(w)
+	rows := e.visualRows(contentWidth)
+	if len(rows) == 0 {
+		return
+	}
+	current := e.cursorVisualRow(rows)
+	vr := rows[current]
+	if end {
+		next := vr.start + contentWidth
+		if next > runeLen(e.lines[e.y]) {
+			next = runeLen(e.lines[e.y])
+		}
+		e.x = next
+	} else {
+		e.x = vr.start
+	}
+	e.clampX()
 }
 
 func (e *editor) selectLineAt(y int) {
@@ -415,10 +514,10 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		e.toggleCheckbox()
 	case tcell.KeyUp:
 		e.beginKeyboardSelection(ev.Modifiers())
-		e.moveVertical(-1)
+		e.moveVisualVertical(-1)
 	case tcell.KeyDown:
 		e.beginKeyboardSelection(ev.Modifiers())
-		e.moveVertical(1)
+		e.moveVisualVertical(1)
 	case tcell.KeyLeft:
 		e.beginKeyboardSelection(ev.Modifiers())
 		if e.x > 0 {
@@ -436,15 +535,13 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 			e.x = 0
 		}
 	case tcell.KeyHome:
-		e.x = 0
+		e.moveLineEdge(false)
 	case tcell.KeyEnd:
-		e.x = runeLen(e.lines[e.y])
+		e.moveLineEdge(true)
 	case tcell.KeyPgUp:
-		e.y = max(0, e.y-10)
-		e.clampX()
+		e.movePageVisual(-1)
 	case tcell.KeyPgDn:
-		e.y = min(len(e.lines)-1, e.y+10)
-		e.clampX()
+		e.movePageVisual(1)
 	case tcell.KeyBackspace, tcell.KeyBackspace2:
 		e.checkpoint()
 		if e.selecting {
@@ -836,6 +933,13 @@ func (e *editor) deleteSelection() {
 
 func (e *editor) insertText(text string) {
 	e.checkpoint()
+	if e.selecting && isURL(strings.TrimSpace(text)) && !strings.Contains(e.selectionText(), "\n") {
+		label := e.selectionText()
+		e.deleteSelection()
+		e.insert("[" + label + "](" + strings.TrimSpace(text) + ")")
+		e.status = "Created link"
+		return
+	}
 	if e.selecting {
 		e.deleteSelection()
 	}
@@ -846,6 +950,10 @@ func (e *editor) insertText(text string) {
 		}
 		e.insert(part)
 	}
+}
+
+func isURL(text string) bool {
+	return strings.HasPrefix(text, "https://") || strings.HasPrefix(text, "http://")
 }
 
 func (e *editor) insertTable() {
@@ -1085,6 +1193,31 @@ func (e *editor) moveVertical(delta int) {
 	e.clampX()
 }
 
+func (e *editor) moveVisualVertical(delta int) {
+	w := 80
+	if e.screen != nil {
+		w, _ = e.screen.Size()
+	}
+	_, contentWidth := writingArea(w)
+	rows := e.visualRows(contentWidth)
+	if len(rows) == 0 {
+		return
+	}
+	current := e.cursorVisualRow(rows)
+	target := max(0, min(len(rows)-1, current+delta))
+	if target == current {
+		return
+	}
+	column := e.x - rows[current].start
+	if column < 0 {
+		column = 0
+	}
+	vr := rows[target]
+	e.y = vr.y
+	e.x = min(runeLen(e.lines[e.y]), vr.start+column)
+	e.clampX()
+}
+
 func (e *editor) clampX() {
 	e.x = min(e.x, runeLen(e.lines[e.y]))
 }
@@ -1204,15 +1337,22 @@ func (e *editor) draw() {
 	}
 	rows := e.visualRows(contentWidth)
 	cursorRow := e.cursorVisualRow(rows)
-	if cursorRow < e.top {
-		e.top = cursorRow
+	if !e.manualScroll {
+		if cursorRow < e.top {
+			e.top = cursorRow
+		}
+		if cursorRow >= e.top+bodyH {
+			e.top = cursorRow - bodyH + 1
+		}
 	}
-	if cursorRow >= e.top+bodyH {
-		e.top = cursorRow - bodyH + 1
+	maxTop := max(0, len(rows)-bodyH)
+	if e.manualScroll {
+		maxTop = manualScrollMaxTop(len(rows))
 	}
+	e.top = min(max(e.top, 0), maxTop)
 	for row := 0; row < bodyH && e.top+row < len(rows); row++ {
 		vr := rows[e.top+row]
-		e.drawVisualLine(left, row, vr, vr.y == e.y, contentWidth)
+		e.drawVisualLine(left, row, vr, e.focusedLine(vr.y), contentWidth)
 	}
 	name := filepath.Base(e.path)
 	if e.path == "" {
@@ -1240,9 +1380,30 @@ func (e *editor) draw() {
 		e.screen.ShowCursor(1+runeLen(e.prompt)+runeLen(e.promptValue), h-1)
 	} else {
 		vr := rows[cursorRow]
-		e.screen.ShowCursor(left+e.x-vr.start, cursorRow-e.top)
+		if cursorRow >= e.top && cursorRow < e.top+bodyH {
+			e.screen.ShowCursor(left+e.x-vr.start, cursorRow-e.top)
+		} else {
+			e.screen.HideCursor()
+		}
 	}
 	e.screen.Show()
+}
+
+func (e *editor) focusedLine(y int) bool {
+	if !e.focusMode {
+		return y == e.y
+	}
+	if strings.TrimSpace(e.lines[e.y]) == "" {
+		return y == e.y
+	}
+	start, end := e.y, e.y
+	for start > 0 && strings.TrimSpace(e.lines[start-1]) != "" {
+		start--
+	}
+	for end+1 < len(e.lines) && strings.TrimSpace(e.lines[end+1]) != "" {
+		end++
+	}
+	return y >= start && y <= end
 }
 
 func (e *editor) drawHelp(w, h int) {
@@ -1298,6 +1459,15 @@ func (e *editor) drawRecent(w, h int) {
 func (e *editor) visualRows(width int) []visualRow {
 	rows := []visualRow{}
 	for y, line := range e.lines {
+		if e.inTable(y) && !e.cursorInSameTable(y) {
+			rows = append(rows, visualRow{y: y, text: e.renderTableLine(y, width)})
+			continue
+		}
+		if y != e.y {
+			if quote, ok := blockQuote(line); ok {
+				line = "│ " + quote
+			}
+		}
 		runes := []rune(line)
 		if len(runes) == 0 {
 			rows = append(rows, visualRow{y: y})
@@ -1330,6 +1500,10 @@ func (e *editor) cursorVisualRow(rows []visualRow) int {
 }
 
 func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width int) {
+	if e.inTable(vr.y) && !e.cursorInSameTable(vr.y) {
+		e.drawLine(left, row, vr.y, e.lines[vr.y], current, width)
+		return
+	}
 	if vr.start == 0 && runeLen(vr.text) == runeLen(e.lines[vr.y]) {
 		e.drawLine(left, row, vr.y, vr.text, current, width)
 		return
@@ -1348,8 +1522,15 @@ func (e *editor) drawLine(left, row, y int, line string, current bool, width int
 	}
 	trimmed := strings.TrimSpace(line)
 	if e.inTable(y) && !e.cursorInSameTable(y) {
-		line = e.renderTableLine(y)
-		style = style.Foreground(e.theme.table)
+		e.drawTableLine(left, row, y, width, style.Foreground(e.theme.table))
+		return
+	}
+	if y != e.y {
+		if quote, ok := blockQuote(line); ok {
+			line = "│ " + quote
+			style = style.Foreground(e.theme.quote)
+			trimmed = strings.TrimSpace(line)
+		}
 	}
 	if level, text, ok := heading(line); ok && !current {
 		line = text
@@ -1431,6 +1612,14 @@ func heading(line string) (int, string, bool) {
 	return level, strings.TrimSpace(trimmed[level+1:]), true
 }
 
+func blockQuote(line string) (string, bool) {
+	trimmed := strings.TrimLeft(line, " ")
+	if !strings.HasPrefix(trimmed, ">") {
+		return line, false
+	}
+	return strings.TrimSpace(strings.TrimPrefix(trimmed, ">")), true
+}
+
 func (e *editor) cursorInSameTable(y int) bool {
 	if !e.inTable(e.y) {
 		return false
@@ -1439,19 +1628,10 @@ func (e *editor) cursorInSameTable(y int) bool {
 	return y >= start && y <= end
 }
 
-func (e *editor) renderTableLine(y int) string {
-	start, end := e.tableBounds(y)
-	widths := []int{}
-	for lineY := start; lineY <= end; lineY++ {
-		if isSeparator(e.lines[lineY]) {
-			continue
-		}
-		for col, cell := range splitTable(e.lines[lineY]) {
-			for len(widths) <= col {
-				widths = append(widths, 3)
-			}
-			widths[col] = max(widths[col], runeLen(cell))
-		}
+func (e *editor) renderTableLine(y int, maxWidths ...int) string {
+	widths := e.tableWidths(y)
+	if len(maxWidths) > 0 {
+		widths = fitTableWidths(widths, maxWidths[0])
 	}
 
 	cells := splitTable(e.lines[y])
@@ -1467,11 +1647,119 @@ func (e *editor) renderTableLine(y int) string {
 	for col, width := range widths {
 		value := ""
 		if col < len(cells) {
-			value = cells[col]
+			value = truncateInlineCell(cells[col], width)
 		}
-		parts[col] = " " + value + strings.Repeat(" ", width-runeLen(value)+1)
+		parts[col] = " " + value + strings.Repeat(" ", width-inlineDisplayWidth(value)+1)
 	}
 	return "│" + strings.Join(parts, "│") + "│"
+}
+
+func (e *editor) drawTableLine(left, row, y, maxWidth int, style tcell.Style) {
+	widths := fitTableWidths(e.tableWidths(y), maxWidth)
+	if isSeparator(e.lines[y]) {
+		e.put(left, row, e.renderTableLine(y, maxWidth), style, left+maxWidth)
+		return
+	}
+
+	cells := splitTable(e.lines[y])
+	x := left
+	e.screen.SetContent(x, row, '│', nil, style)
+	x++
+	for col, width := range widths {
+		e.screen.SetContent(x, row, ' ', nil, style)
+		x++
+		value := ""
+		if col < len(cells) {
+			value = truncateInlineCell(cells[col], width)
+		}
+		e.putInline(x, row, value, style, x+width)
+		x += width
+		e.screen.SetContent(x, row, ' ', nil, style)
+		x++
+		e.screen.SetContent(x, row, '│', nil, style)
+		x++
+	}
+}
+
+func (e *editor) tableWidths(y int) []int {
+	start, end := e.tableBounds(y)
+	widths := []int{}
+	for lineY := start; lineY <= end; lineY++ {
+		if isSeparator(e.lines[lineY]) {
+			continue
+		}
+		for col, cell := range splitTable(e.lines[lineY]) {
+			for len(widths) <= col {
+				widths = append(widths, 3)
+			}
+			widths[col] = max(widths[col], inlineDisplayWidth(cell))
+		}
+	}
+	return widths
+}
+
+func fitTableWidths(widths []int, maxWidth int) []int {
+	fitted := append([]int(nil), widths...)
+	available := maxWidth - 3*len(fitted) - 1
+	for sumInts(fitted) > available {
+		widest := -1
+		for i, width := range fitted {
+			if width > 1 && (widest == -1 || width > fitted[widest]) {
+				widest = i
+			}
+		}
+		if widest == -1 {
+			break
+		}
+		fitted[widest]--
+	}
+	return fitted
+}
+
+func sumInts(values []int) int {
+	total := 0
+	for _, value := range values {
+		total += value
+	}
+	return total
+}
+
+func truncateCell(value string, width int) string {
+	runes := []rune(value)
+	if len(runes) <= width {
+		return value
+	}
+	if width <= 1 {
+		return "…"
+	}
+	return string(runes[:width-1]) + "…"
+}
+
+func truncateInlineCell(value string, width int) string {
+	if inlineDisplayWidth(value) <= width {
+		return value
+	}
+	return truncateCell(inlinePlainText(value), width)
+}
+
+func inlineDisplayWidth(value string) int {
+	return runeLen(inlinePlainText(value))
+}
+
+func inlinePlainText(value string) string {
+	runes := []rune(value)
+	var plain []rune
+	for i := 0; i < len(runes); {
+		marker, _, end := emphasisAt(runes, i)
+		if marker > 0 {
+			plain = append(plain, runes[i+marker:end]...)
+			i = end + marker
+			continue
+		}
+		plain = append(plain, runes[i])
+		i++
+	}
+	return string(plain)
 }
 
 func (e *editor) put(x, y int, text string, style tcell.Style, maxWidth int) {
@@ -1487,6 +1775,20 @@ func (e *editor) put(x, y int, text string, style tcell.Style, maxWidth int) {
 func (e *editor) putInline(x, screenY int, text string, base tcell.Style, maxWidth int) {
 	runes := []rune(text)
 	for i := 0; i < len(runes) && x < maxWidth; {
+		if runes[i] == '`' {
+			if end := closingRune(runes, i+1, '`'); end > i+1 {
+				codeStyle := base.Foreground(tcell.ColorLightGoldenrodYellow).Background(tcell.ColorDarkSlateGray)
+				for _, r := range runes[i+1 : end] {
+					if x >= maxWidth {
+						break
+					}
+					e.screen.SetContent(x, screenY, r, nil, codeStyle)
+					x++
+				}
+				i = end + 1
+				continue
+			}
+		}
 		marker, styled, end := emphasisAt(runes, i)
 		if marker > 0 {
 			for _, r := range runes[i+marker : end] {
@@ -1503,6 +1805,15 @@ func (e *editor) putInline(x, screenY int, text string, base tcell.Style, maxWid
 		x++
 		i++
 	}
+}
+
+func closingRune(runes []rune, start int, target rune) int {
+	for i := start; i < len(runes); i++ {
+		if runes[i] == target {
+			return i
+		}
+	}
+	return -1
 }
 
 func emphasisAt(runes []rune, start int) (int, func(tcell.Style) tcell.Style, int) {
