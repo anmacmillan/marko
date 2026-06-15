@@ -1604,7 +1604,7 @@ func (e *editor) renderTableLine(y int, maxWidths ...int) string {
 			for len(widths) <= col {
 				widths = append(widths, 3)
 			}
-			widths[col] = max(widths[col], runeLen(cell))
+			widths[col] = max(widths[col], inlineDisplayWidth(cell))
 		}
 	}
 	if len(maxWidths) > 0 {
@@ -1624,9 +1624,9 @@ func (e *editor) renderTableLine(y int, maxWidths ...int) string {
 	for col, width := range widths {
 		value := ""
 		if col < len(cells) {
-			value = truncateCell(cells[col], width)
+			value = truncateInlineCell(cells[col], width)
 		}
-		parts[col] = " " + value + strings.Repeat(" ", width-runeLen(value)+1)
+		parts[col] = " " + value + strings.Repeat(" ", width-inlineDisplayWidth(value)+1)
 	}
 	return "│" + strings.Join(parts, "│") + "│"
 }
@@ -1666,6 +1666,33 @@ func truncateCell(value string, width int) string {
 		return "…"
 	}
 	return string(runes[:width-1]) + "…"
+}
+
+func truncateInlineCell(value string, width int) string {
+	if inlineDisplayWidth(value) <= width {
+		return value
+	}
+	return truncateCell(inlinePlainText(value), width)
+}
+
+func inlineDisplayWidth(value string) int {
+	return runeLen(inlinePlainText(value))
+}
+
+func inlinePlainText(value string) string {
+	runes := []rune(value)
+	var plain []rune
+	for i := 0; i < len(runes); {
+		marker, _, end := emphasisAt(runes, i)
+		if marker > 0 {
+			plain = append(plain, runes[i+marker:end]...)
+			i = end + marker
+			continue
+		}
+		plain = append(plain, runes[i])
+		i++
+	}
+	return string(plain)
 }
 
 func (e *editor) put(x, y int, text string, style tcell.Style, maxWidth int) {

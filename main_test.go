@@ -92,6 +92,63 @@ func TestRenderTableLineFitsWritingArea(t *testing.T) {
 	}
 }
 
+func TestRenderTableLineMeasuresInlineMarkdownByDisplayWidth(t *testing.T) {
+	e := &editor{
+		lines: []string{
+			"| Head | Award |",
+			"| --- | --- |",
+			"| **Sub-total** | **£236,304** |",
+			"| Plain | £1 |",
+		},
+		y: 10,
+	}
+	got := e.renderTableLine(2)
+	if want := "│ **Sub-total** │ **£236,304** │"; got != want {
+		t.Fatalf("bold table row = %q, want %q", got, want)
+	}
+	if got, want := inlineDisplayWidth(got), 24; got != want {
+		t.Fatalf("bold table row display width = %d, want %d", got, want)
+	}
+}
+
+func TestRenderedTableAppliesBoldStyle(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(40, 5)
+	e := &editor{
+		screen: screen,
+		lines: []string{
+			"| Head | Award |",
+			"| --- | --- |",
+			"| **Sub-total** | **£236,304** |",
+			"",
+		},
+		y:     3,
+		theme: themeByName("calm"),
+	}
+	e.drawLine(0, 0, 2, e.lines[2], false, 40)
+	mainc, _, style, _ := screen.GetContent(2, 0)
+	if mainc != 'S' {
+		t.Fatalf("first bold table character = %q, want S", mainc)
+	}
+	_, _, attrs := style.Decompose()
+	if attrs&tcell.AttrBold == 0 {
+		t.Fatal("bold table cell did not receive bold style")
+	}
+}
+
+func TestTruncateInlineCellProducesCleanText(t *testing.T) {
+	if got, want := truncateInlineCell("**A long bold value**", 8), "A long …"; got != want {
+		t.Fatalf("truncateInlineCell() = %q, want %q", got, want)
+	}
+	if got, want := truncateInlineCell("**bold**", 4), "**bold**"; got != want {
+		t.Fatalf("fitting bold cell = %q, want %q", got, want)
+	}
+}
+
 func TestRenderedTableRowsDoNotWrapRawMarkdown(t *testing.T) {
 	e := &editor{
 		lines: []string{
