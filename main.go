@@ -933,6 +933,13 @@ func (e *editor) deleteSelection() {
 
 func (e *editor) insertText(text string) {
 	e.checkpoint()
+	if e.selecting && isURL(strings.TrimSpace(text)) && !strings.Contains(e.selectionText(), "\n") {
+		label := e.selectionText()
+		e.deleteSelection()
+		e.insert("[" + label + "](" + strings.TrimSpace(text) + ")")
+		e.status = "Created link"
+		return
+	}
 	if e.selecting {
 		e.deleteSelection()
 	}
@@ -943,6 +950,10 @@ func (e *editor) insertText(text string) {
 		}
 		e.insert(part)
 	}
+}
+
+func isURL(text string) bool {
+	return strings.HasPrefix(text, "https://") || strings.HasPrefix(text, "http://")
 }
 
 func (e *editor) insertTable() {
@@ -1452,6 +1463,11 @@ func (e *editor) visualRows(width int) []visualRow {
 			rows = append(rows, visualRow{y: y, text: e.renderTableLine(y, width)})
 			continue
 		}
+		if y != e.y {
+			if quote, ok := blockQuote(line); ok {
+				line = "│ " + quote
+			}
+		}
 		runes := []rune(line)
 		if len(runes) == 0 {
 			rows = append(rows, visualRow{y: y})
@@ -1508,6 +1524,13 @@ func (e *editor) drawLine(left, row, y int, line string, current bool, width int
 	if e.inTable(y) && !e.cursorInSameTable(y) {
 		e.drawTableLine(left, row, y, width, style.Foreground(e.theme.table))
 		return
+	}
+	if y != e.y {
+		if quote, ok := blockQuote(line); ok {
+			line = "│ " + quote
+			style = style.Foreground(e.theme.quote)
+			trimmed = strings.TrimSpace(line)
+		}
 	}
 	if level, text, ok := heading(line); ok && !current {
 		line = text
@@ -1587,6 +1610,14 @@ func heading(line string) (int, string, bool) {
 		return 0, line, false
 	}
 	return level, strings.TrimSpace(trimmed[level+1:]), true
+}
+
+func blockQuote(line string) (string, bool) {
+	trimmed := strings.TrimLeft(line, " ")
+	if !strings.HasPrefix(trimmed, ">") {
+		return line, false
+	}
+	return strings.TrimSpace(strings.TrimPrefix(trimmed, ">")), true
 }
 
 func (e *editor) cursorInSameTable(y int) bool {
@@ -1744,6 +1775,20 @@ func (e *editor) put(x, y int, text string, style tcell.Style, maxWidth int) {
 func (e *editor) putInline(x, screenY int, text string, base tcell.Style, maxWidth int) {
 	runes := []rune(text)
 	for i := 0; i < len(runes) && x < maxWidth; {
+		if runes[i] == '`' {
+			if end := closingRune(runes, i+1, '`'); end > i+1 {
+				codeStyle := base.Foreground(tcell.ColorLightGoldenrodYellow).Background(tcell.ColorDarkSlateGray)
+				for _, r := range runes[i+1 : end] {
+					if x >= maxWidth {
+						break
+					}
+					e.screen.SetContent(x, screenY, r, nil, codeStyle)
+					x++
+				}
+				i = end + 1
+				continue
+			}
+		}
 		marker, styled, end := emphasisAt(runes, i)
 		if marker > 0 {
 			for _, r := range runes[i+marker : end] {
@@ -1760,6 +1805,15 @@ func (e *editor) putInline(x, screenY int, text string, base tcell.Style, maxWid
 		x++
 		i++
 	}
+}
+
+func closingRune(runes []rune, start int, target rune) int {
+	for i := start; i < len(runes); i++ {
+		if runes[i] == target {
+			return i
+		}
+	}
+	return -1
 }
 
 func emphasisAt(runes []rune, start int) (int, func(tcell.Style) tcell.Style, int) {

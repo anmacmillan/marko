@@ -320,6 +320,35 @@ func TestHeading(t *testing.T) {
 	}
 }
 
+func TestBlockQuote(t *testing.T) {
+	if got, ok := blockQuote("  > Important point"); !ok || got != "Important point" {
+		t.Fatalf("blockQuote() = %q, %t", got, ok)
+	}
+	if _, ok := blockQuote("ordinary prose"); ok {
+		t.Fatal("ordinary prose detected as block quote")
+	}
+}
+
+func TestRenderedBlockQuoteHidesMarker(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(40, 4)
+	e := &editor{
+		screen: screen,
+		lines:  []string{"> Important point", ""},
+		y:      1,
+		theme:  themeByName("calm"),
+	}
+	rows := e.visualRows(40)
+	e.drawVisualLine(0, 0, rows[0], false, 40)
+	if got, want := strings.TrimRight(simulationLine(screen, 0, 40), " "), "│ Important point"; got != want {
+		t.Fatalf("rendered quote = %q, want %q", got, want)
+	}
+}
+
 func TestEmphasisAt(t *testing.T) {
 	tests := []struct {
 		text       string
@@ -342,6 +371,34 @@ func TestEmphasisAt(t *testing.T) {
 		if style != nil {
 			_ = style(tcell.StyleDefault)
 		}
+	}
+}
+
+func TestInlineCodeRendering(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(40, 3)
+	e := &editor{screen: screen}
+	e.putInline(0, 0, "Use `marko note.md` now", tcell.StyleDefault, 40)
+	if got, want := strings.TrimRight(simulationLine(screen, 0, 40), " "), "Use marko note.md now"; got != want {
+		t.Fatalf("inline code rendering = %q, want %q", got, want)
+	}
+	_, _, style, _ := screen.GetContent(4, 0)
+	fg, bg, _ := style.Decompose()
+	if fg != tcell.ColorLightGoldenrodYellow || bg != tcell.ColorDarkSlateGray {
+		t.Fatalf("inline code style = fg %v bg %v", fg, bg)
+	}
+}
+
+func TestClosingRune(t *testing.T) {
+	if got, want := closingRune([]rune("`code`"), 1, '`'), 5; got != want {
+		t.Fatalf("closingRune() = %d, want %d", got, want)
+	}
+	if got := closingRune([]rune("`open"), 1, '`'); got != -1 {
+		t.Fatalf("closingRune() = %d, want -1", got)
 	}
 }
 
@@ -648,6 +705,25 @@ func TestTypingReplacesSelection(t *testing.T) {
 	e.insert("Marko")
 	if got, want := e.lines[0], "hello Marko"; got != want {
 		t.Fatalf("selection replacement = %q, want %q", got, want)
+	}
+}
+
+func TestPastingURLOverSelectionCreatesLink(t *testing.T) {
+	e := &editor{lines: []string{"Read the judgment"}, selX: 9, selY: 0, x: 17, y: 0, selecting: true}
+	e.insertText("https://example.com/judgment")
+	if got, want := e.lines[0], "Read the [judgment](https://example.com/judgment)"; got != want {
+		t.Fatalf("smart URL paste = %q, want %q", got, want)
+	}
+	if e.status != "Created link" {
+		t.Fatalf("smart URL paste status = %q", e.status)
+	}
+}
+
+func TestPastingNonURLStillReplacesSelection(t *testing.T) {
+	e := &editor{lines: []string{"hello world"}, selX: 6, selY: 0, x: 11, y: 0, selecting: true}
+	e.insertText("Marko")
+	if got, want := e.lines[0], "hello Marko"; got != want {
+		t.Fatalf("ordinary paste = %q, want %q", got, want)
 	}
 }
 
