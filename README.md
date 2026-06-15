@@ -67,6 +67,8 @@ Press `F1` inside Marko for the complete shortcut overlay.
   Markdown pipes when entered
 - Headings, bold, italic, and strikethrough follow the same reveal-on-edit model
 - `zopa` fenced blocks render settlement overlap as compact range charts
+- Ordinary fenced code blocks render with a calm language label and reveal
+  their source when entered
 - Everything happens inside the editable buffer, never in a preview pane
 - `Ctrl-T` creates a table
 - `Tab` moves through table cells

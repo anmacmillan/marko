@@ -20,6 +20,21 @@ func TestSplitTable(t *testing.T) {
 	}
 }
 
+func TestSplitTablePreservesEscapedAndCodePipes(t *testing.T) {
+	got := splitTable("| literal \\| pipe | `a | b` | final |")
+	want := []string{"literal \\| pipe", "`a | b`", "final"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("splitTable() = %#v, want %#v", got, want)
+	}
+}
+
+func TestEscapedPipeDoesNotCreateTable(t *testing.T) {
+	e := &editor{lines: []string{"Use A \\| B in prose"}}
+	if e.inTable(0) {
+		t.Fatal("escaped prose pipe detected as table")
+	}
+}
+
 func TestIsSeparator(t *testing.T) {
 	if !isSeparator("| --- | :---: | ---: |") {
 		t.Fatal("expected separator row")
@@ -399,6 +414,50 @@ func TestZOPANoOverlap(t *testing.T) {
 	lines := renderZOPA(zopaChart{claimantTarget: 120000, claimantMinimum: 100000, respondentMaximum: 90000, respondentOffer: 70000}, 70)
 	if got, want := lines[0], "Settlement range · No ZOPA"; got != want {
 		t.Fatalf("no-overlap heading = %q, want %q", got, want)
+	}
+}
+
+func TestOrdinaryCodeFenceRendersCalmBlock(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(40, 6)
+	e := &editor{
+		screen: screen,
+		lines:  []string{"```go", `fmt.Println("hello")`, "```", ""},
+		y:      3,
+		theme:  themeByName("calm"),
+	}
+	rows := e.visualRows(40)
+	if got, want := len(rows), 4; got != want {
+		t.Fatalf("code visualRows() = %d, want %d", got, want)
+	}
+	for row, vr := range rows[:3] {
+		e.drawVisualLine(0, row, vr, false, 40)
+	}
+	if got := strings.TrimRight(simulationLine(screen, 0, 40), " "); got != "┌ code · go" {
+		t.Fatalf("code header = %q", got)
+	}
+	if got := strings.TrimRight(simulationLine(screen, 1, 40), " "); got != `│ fmt.Println("hello")` {
+		t.Fatalf("code body = %q", got)
+	}
+}
+
+func TestIncompleteCodeFenceRemainsRaw(t *testing.T) {
+	e := &editor{lines: []string{"```go", "fmt.Println()"}, y: 1}
+	rows := e.visualRows(40)
+	if got, want := rows[0].text, "```go"; got != want {
+		t.Fatalf("incomplete fence = %q, want %q", got, want)
+	}
+}
+
+func TestCodeFenceShowsSourceWhileEditing(t *testing.T) {
+	e := &editor{lines: []string{"```go", "fmt.Println()", "```"}, y: 1}
+	rows := e.visualRows(40)
+	if got, want := rows[0].text, "```go"; got != want {
+		t.Fatalf("editing code fence = %q, want %q", got, want)
 	}
 }
 
@@ -894,5 +953,40 @@ func TestJournalPathIsInsideConfig(t *testing.T) {
 	got := journalPath("/tmp/example.md")
 	if !strings.Contains(got, filepath.Join("marko", "recovery")) || !strings.HasSuffix(got, ".journal") {
 		t.Fatalf("journalPath = %q", got)
+	}
+}
+
+func TestAutosaveWritesThenRemovesRecoveryJournal(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	path := filepath.Join(dir, "doc.md")
+	e := &editor{path: path, lines: []string{"recovered £ text"}, dirty: true, lastEdit: time.Now().Add(-3 * time.Second)}
+	e.autosave()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(data), "recovered £ text"; got != want {
+		t.Fatalf("autosaved content = %q, want %q", got, want)
+	}
+	if _, err := os.Stat(journalPath(path)); !os.IsNotExist(err) {
+		t.Fatalf("recovery journal remains after save: %v", err)
+	}
+}
+
+func TestSaveProtectsExternalChanges(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "doc.md")
+	if err := os.WriteFile(path, []byte("external"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	e := &editor{path: path, lines: []string{"local"}, dirty: true, modTime: old}
+	e.save()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "external" || !e.conflict {
+		t.Fatalf("external change overwritten: data=%q conflict=%t", data, e.conflict)
 	}
 }
