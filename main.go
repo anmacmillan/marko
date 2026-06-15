@@ -1214,7 +1214,7 @@ func (e *editor) chartFenceBounds(y int) (int, int, bool) {
 }
 
 func (e *editor) inTable(y int) bool {
-	return y >= 0 && y < len(e.lines) && strings.Count(e.lines[y], "|") >= 2
+	return y >= 0 && y < len(e.lines) && len(splitTable(e.lines[y])) >= 2
 }
 
 func (e *editor) tableBounds(y int) (int, int) {
@@ -1540,6 +1540,15 @@ func (e *editor) visualRows(width int) []visualRow {
 			y = end
 			continue
 		}
+		if language, end, ok := e.codeFence(y); ok && (e.y < y || e.y > end) {
+			rows = append(rows, visualRow{y: y, text: "┌ code · " + language})
+			for lineY := y + 1; lineY < end; lineY++ {
+				rows = append(rows, visualRow{y: lineY, text: "│ " + e.lines[lineY]})
+			}
+			rows = append(rows, visualRow{y: end, text: "└"})
+			y = end
+			continue
+		}
 		if e.inTable(y) && !e.cursorInSameTable(y) {
 			rows = append(rows, visualRow{y: y, text: e.renderTableLine(y, width)})
 			continue
@@ -1569,6 +1578,26 @@ func (e *editor) visualRows(width int) []visualRow {
 		}
 	}
 	return rows
+}
+
+func (e *editor) codeFence(start int) (string, int, bool) {
+	if start < 0 || start >= len(e.lines) {
+		return "", start, false
+	}
+	open := strings.TrimSpace(e.lines[start])
+	if !strings.HasPrefix(open, "```") || open == "```zopa" {
+		return "", start, false
+	}
+	for end := start + 1; end < len(e.lines); end++ {
+		if strings.TrimSpace(e.lines[end]) == "```" {
+			language := strings.TrimSpace(strings.TrimPrefix(open, "```"))
+			if language == "" {
+				language = "text"
+			}
+			return language, end, true
+		}
+	}
+	return "", start, false
 }
 
 func (e *editor) zopaBlock(start int) (zopaChart, int, bool) {
@@ -1646,6 +1675,11 @@ func (e *editor) cursorVisualRow(rows []visualRow) int {
 }
 
 func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width int) {
+	if _, _, ok := e.codeFenceBounds(vr.y); ok {
+		style := tcell.StyleDefault.Foreground(tcell.ColorLightGoldenrodYellow).Background(tcell.ColorDarkSlateGray)
+		e.put(left, row, vr.text, style, left+width)
+		return
+	}
 	if e.inTable(vr.y) && !e.cursorInSameTable(vr.y) {
 		e.drawLine(left, row, vr.y, e.lines[vr.y], current, width)
 		return
@@ -1659,6 +1693,16 @@ func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width
 		style = style.Dim(true)
 	}
 	e.putSelected(left, row, vr.text, style, width, vr.y, vr.start)
+}
+
+func (e *editor) codeFenceBounds(y int) (int, int, bool) {
+	for start := y; start >= 0; start-- {
+		_, end, ok := e.codeFence(start)
+		if ok && y <= end {
+			return start, end, true
+		}
+	}
+	return 0, 0, false
 }
 
 func (e *editor) drawLine(left, row, y int, line string, current bool, width int) {
@@ -2001,8 +2045,35 @@ func runesEqualAt(haystack []rune, start int, needle []rune) bool {
 }
 
 func splitTable(line string) []string {
-	line = strings.TrimSpace(strings.Trim(line, "|"))
-	parts := strings.Split(line, "|")
+	runes := []rune(strings.TrimSpace(line))
+	var parts []string
+	var cell []rune
+	inCode, escaped := false, false
+	for _, r := range runes {
+		switch {
+		case escaped:
+			cell = append(cell, r)
+			escaped = false
+		case r == '\\':
+			cell = append(cell, r)
+			escaped = true
+		case r == '`':
+			cell = append(cell, r)
+			inCode = !inCode
+		case r == '|' && !inCode:
+			parts = append(parts, string(cell))
+			cell = nil
+		default:
+			cell = append(cell, r)
+		}
+	}
+	parts = append(parts, string(cell))
+	if len(parts) > 0 && strings.TrimSpace(parts[0]) == "" {
+		parts = parts[1:]
+	}
+	if len(parts) > 0 && strings.TrimSpace(parts[len(parts)-1]) == "" {
+		parts = parts[:len(parts)-1]
+	}
 	for i := range parts {
 		parts[i] = strings.TrimSpace(parts[i])
 	}
