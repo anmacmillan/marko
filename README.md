@@ -2,9 +2,10 @@
 
 **A calm, modeless Markdown editor for the terminal.**
 
-Marko combines Micro-style familiar editing with **dynamic inline Markdown
-rendering**. Headings, emphasis, and tables render cleanly inside the terminal;
-move into them and their editable Markdown source reappears instantly.
+Marko combines the best bits of `pencil`-style writing and Goyo-style focus
+with **dynamic inline Markdown rendering**. Headings, emphasis, and tables
+render cleanly inside the terminal; move into them and their editable Markdown
+source reappears instantly.
 
 There is no preview pane, no modal editing, no notes database, and no workspace
 to manage. Your files remain ordinary Markdown.
@@ -21,6 +22,8 @@ a separate read-only viewer, or a powerful modal editor with a learning curve.
 Marko fills the smaller gap between them.
 
 - Type and navigate normally with arrow keys, mouse, selection, and clipboard
+- Arrow movement follows wrapped visual lines, closer to `pencil` than a raw
+  source-line editor
 - Read dynamically rendered headings, emphasis, and aligned tables directly in
   the editable terminal buffer
 - Enter any rendered structure to reveal and edit its ordinary Markdown source
@@ -31,7 +34,8 @@ Marko fills the smaller gap between them.
 - Keep every document portable as a plain `.md` file
 
 Marko deliberately avoids becoming an IDE or knowledge-management system. It
-aims to make everyday terminal notes and documents pleasant to write.
+aims to be a simple Markdown editor that keeps the writing surface calm,
+focused, and portable.
 
 ## Quick Start
 
@@ -52,6 +56,7 @@ Press `F1` inside Marko for the complete shortcut overlay.
 - Modeless editing with mouse support
 - Centered 88-column writing area on wide terminals
 - Word-aware wrapping and paragraph-based focus mode
+- Visual-line navigation on wrapped prose
 - Mouse-wheel and trackpad scrolling
 - Four persistent themes: calm, green, mono, and light
 - Recent-file picker with `Ctrl-E`

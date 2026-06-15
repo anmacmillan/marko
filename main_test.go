@@ -71,6 +71,48 @@ func TestRenderTableLine(t *testing.T) {
 	}
 }
 
+func TestRenderTableLineFitsWritingArea(t *testing.T) {
+	e := &editor{
+		lines: []string{
+			"| Head | Realistic award |",
+			"| --- | --- |",
+			"| Loss of statutory rights | £600 |",
+			"| Injury to feelings (upper Vento) | £36,400 |",
+		},
+		y: 10,
+	}
+	for y := range e.lines {
+		got := e.renderTableLine(y, 32)
+		if runeLen(got) != 32 {
+			t.Fatalf("renderTableLine(%d) width = %d, want 32: %q", y, runeLen(got), got)
+		}
+	}
+	if got := e.renderTableLine(3, 32); !strings.Contains(got, "…") {
+		t.Fatalf("expected truncated cell, got %q", got)
+	}
+}
+
+func TestRenderedTableRowsDoNotWrapRawMarkdown(t *testing.T) {
+	e := &editor{
+		lines: []string{
+			"| A very long heading that exceeds the viewport | Value |",
+			"| --- | --- |",
+			"| A very long value that also exceeds the viewport | £1 |",
+			"",
+		},
+		y: 3,
+	}
+	rows := e.visualRows(24)
+	if got, want := len(rows), 4; got != want {
+		t.Fatalf("visualRows() count = %d, want %d", got, want)
+	}
+	for i := 0; i < 3; i++ {
+		if got := runeLen(rows[i].text); got != 24 {
+			t.Fatalf("table row %d width = %d, want 24", i, got)
+		}
+	}
+}
+
 func TestHeading(t *testing.T) {
 	level, text, ok := heading("### Key documents")
 	if !ok || level != 3 || text != "Key documents" {
@@ -157,6 +199,35 @@ func TestVisualRowsWrapAndMap(t *testing.T) {
 	}
 }
 
+func TestMoveVisualVerticalFollowsWrappedRows(t *testing.T) {
+	e := &editor{lines: []string{strings.Repeat("a", 120), "ij"}, x: 10, y: 0}
+	e.moveVisualVertical(1)
+	if e.y != 0 {
+		t.Fatalf("moveVisualVertical down = (%d,%d), want same source line", e.y, e.x)
+	}
+	e.moveVisualVertical(1)
+	if e.y != 1 {
+		t.Fatalf("moveVisualVertical down again = (%d,%d), want next source line after wraps", e.y, e.x)
+	}
+	e.moveVisualVertical(-1)
+	if e.y != 0 {
+		t.Fatalf("moveVisualVertical up = (%d,%d), want return to wrapped line", e.y, e.x)
+	}
+}
+
+func TestMoveLineEdgeUsesVisualRowBoundaries(t *testing.T) {
+	e := &editor{lines: []string{strings.Repeat("a", 120)}, x: 37, y: 0}
+	e.moveLineEdge(false)
+	if e.x != 0 {
+		t.Fatalf("moveLineEdge(false) = %d, want 0", e.x)
+	}
+	e.x = 37
+	e.moveLineEdge(true)
+	if e.x != 76 {
+		t.Fatalf("moveLineEdge(true) = %d, want 76", e.x)
+	}
+}
+
 func TestFocusedLineUsesCurrentParagraph(t *testing.T) {
 	e := &editor{
 		lines:     []string{"first", "", "current one", "current two", "", "last"},
@@ -182,12 +253,35 @@ func TestScrollByClampsTop(t *testing.T) {
 		t.Fatalf("scrollBy() = top %d manualScroll %t", e.top, e.manualScroll)
 	}
 	e.scrollBy(50, 5, 20)
-	if e.top != 15 {
-		t.Fatalf("scrollBy clamp down = %d, want 15", e.top)
+	if e.top != 19 {
+		t.Fatalf("scrollBy clamp down = %d, want 19", e.top)
 	}
 	e.scrollBy(-100, 5, 20)
 	if e.top != 0 {
 		t.Fatalf("scrollBy clamp up = %d, want 0", e.top)
+	}
+}
+
+func TestManualScrollCanPutFinalRowAtTop(t *testing.T) {
+	if got, want := manualScrollMaxTop(20), 19; got != want {
+		t.Fatalf("manualScrollMaxTop() = %d, want %d", got, want)
+	}
+	if got := manualScrollMaxTop(0); got != 0 {
+		t.Fatalf("manualScrollMaxTop(0) = %d, want 0", got)
+	}
+}
+
+func TestMouseReleaseDoesNotCancelManualScroll(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(80, 20)
+	e := &editor{screen: screen, lines: []string{"one", "two"}, manualScroll: true}
+	e.mouse(tcell.NewEventMouse(0, 0, tcell.ButtonNone, tcell.ModNone))
+	if !e.manualScroll {
+		t.Fatal("mouse release canceled manual scroll")
 	}
 }
 
