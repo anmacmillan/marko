@@ -44,11 +44,12 @@ type editor struct {
 	manualScroll bool
 	modTime      time.Time
 	conflict     bool
-	showHelp     bool
-	showRecent   bool
-	recent       []string
-	recentIndex  int
-	renameFrom   string
+	showHelp        bool
+	showRecent      bool
+	recent          []string
+	recentIndex     int
+	renameFrom      string
+	waitingForPaste bool
 }
 
 type snapshot struct {
@@ -247,6 +248,14 @@ func (e *editor) run() {
 		case *tcell.EventInterrupt:
 			e.autosave()
 			e.focusMode = time.Since(e.lastAction) >= 5*time.Second
+			if e.externalChange() {
+				if !e.dirty {
+					e.reloadFile()
+				} else {
+					e.conflict = true
+					e.status = "File changed outside Marko. Use Save As or reopen it."
+				}
+			}
 		case *tcell.EventKey:
 			e.lastAction, e.focusMode, e.manualScroll = time.Now(), false, false
 			if e.key(ev) {
@@ -256,7 +265,10 @@ func (e *editor) run() {
 			e.lastAction, e.focusMode = time.Now(), false
 			e.mouse(ev)
 		case *tcell.EventClipboard:
-			e.insertText(string(ev.Data()))
+			if e.waitingForPaste {
+				e.insertText(string(ev.Data()))
+				e.waitingForPaste = false
+			}
 		}
 	}
 }
@@ -316,13 +328,8 @@ func (e *editor) mouse(ev *tcell.EventMouse) {
 		}
 		e.x, e.y = x, y
 		e.selecting = e.selX != e.x || e.selY != e.y
-	} else if e.mouseDown {
-		if x == e.x && y == e.y {
-			e.mouseDown = false
-			return
-		}
-		e.x, e.y = x, y
-		e.selecting = e.selX != e.x || e.selY != e.y
+	} else {
+		e.mouseDown = false
 	}
 }
 
@@ -505,6 +512,7 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		if data, err := clipboardRead(); err == nil {
 			e.insertText(string(data))
 		} else {
+			e.waitingForPaste = true
 			e.screen.GetClipboard()
 		}
 	case tcell.KeyCtrlT:
@@ -1327,7 +1335,8 @@ func (e *editor) reloadFile() {
 	}
 	e.checkpoint()
 	e.lines = strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
-	e.x, e.y, e.top = 0, 0, 0
+	e.y = min(e.y, len(e.lines)-1)
+	e.clampX()
 	e.dirty, e.conflict = false, false
 	if info, err := os.Stat(e.path); err == nil {
 		e.modTime = info.ModTime()
@@ -1462,18 +1471,82 @@ func (e *editor) draw() {
 	e.screen.Show()
 }
 
+func isParagraphBoundary(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return true
+	}
+	if strings.HasPrefix(trimmed, "#") {
+		return true
+	}
+	if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") || strings.HasPrefix(trimmed, "+ ") {
+		return true
+	}
+	if len(trimmed) > 2 && trimmed[0] >= '0' && trimmed[0] <= '9' {
+		for idx, r := range trimmed {
+			if r == '.' && idx+1 < len(trimmed) && trimmed[idx+1] == ' ' {
+				return true
+			}
+			if r < '0' || r > '9' {
+				break
+			}
+		}
+	}
+	if strings.HasPrefix(trimmed, "```") {
+		return true
+	}
+	if strings.HasPrefix(trimmed, "|") {
+		return true
+	}
+	if strings.HasPrefix(trimmed, ">") {
+		return true
+	}
+	return false
+}
+
 func (e *editor) focusedLine(y int) bool {
 	if !e.focusMode {
 		return y == e.y
 	}
-	if strings.TrimSpace(e.lines[e.y]) == "" {
+	if start, end, ok := e.codeFenceBounds(e.y); ok {
+		return y >= start && y <= end
+	}
+	if e.inTable(e.y) {
+		start, end := e.tableBounds(e.y)
+		return y >= start && y <= end
+	}
+	if start, end, ok := e.zopaFenceBounds(e.y); ok {
+		return y >= start && y <= end
+	}
+
+	currentLine := e.lines[e.y]
+	if isParagraphBoundary(currentLine) {
 		return y == e.y
 	}
+
 	start, end := e.y, e.y
-	for start > 0 && strings.TrimSpace(e.lines[start-1]) != "" {
+	for start > 0 && !isParagraphBoundary(e.lines[start-1]) {
+		if _, _, ok := e.codeFenceBounds(start-1); ok {
+			break
+		}
+		if e.inTable(start-1) {
+			break
+		}
+		if _, _, ok := e.zopaFenceBounds(start-1); ok {
+			break
+		}
 		start--
 	}
-	for end+1 < len(e.lines) && strings.TrimSpace(e.lines[end+1]) != "" {
+	for end+1 < len(e.lines) && !isParagraphBoundary(e.lines[end+1]) {
+		if _, _, ok := e.codeFenceBounds(end+1); ok {
+			break
+		}
+		if e.inTable(end+1) {
+			break
+		}
+		if _, _, ok := e.zopaFenceBounds(end+1); ok {
+			break
+		}
 		end++
 	}
 	return y >= start && y <= end
@@ -1534,8 +1607,8 @@ func (e *editor) visualRows(width int) []visualRow {
 	for y := 0; y < len(e.lines); y++ {
 		line := e.lines[y]
 		if chart, end, ok := e.zopaBlock(y); ok && (e.y < y || e.y > end) {
-			for _, text := range renderZOPA(chart, width) {
-				rows = append(rows, visualRow{y: y, text: text})
+			for i, text := range renderZOPA(chart, width) {
+				rows = append(rows, visualRow{y: y, start: i, text: text})
 			}
 			y = end
 			continue
@@ -1632,7 +1705,7 @@ func (e *editor) zopaBlock(start int) (zopaChart, int, bool) {
 func renderZOPA(chart zopaChart, width int) []string {
 	minValue := min(chart.respondentOffer, chart.claimantMinimum)
 	maxValue := max(chart.claimantTarget, chart.respondentMaximum)
-	barWidth := max(20, min(width-2, 68))
+	barWidth := max(36, min(width-2, 72))
 	position := func(value int) int {
 		if maxValue == minValue {
 			return 0
@@ -1640,13 +1713,45 @@ func renderZOPA(chart zopaChart, width int) []string {
 		return (value - minValue) * (barWidth - 1) / (maxValue - minValue)
 	}
 	axis := []rune(strings.Repeat("─", barWidth))
-	for _, value := range []int{chart.respondentOffer, chart.claimantMinimum, chart.respondentMaximum, chart.claimantTarget} {
-		axis[position(value)] = '┼'
+	claimantBand := make([]rune, barWidth)
+	overlapBand := make([]rune, barWidth)
+	respondentBand := make([]rune, barWidth)
+	labels := make([]rune, barWidth)
+	for i := range labels {
+		labels[i] = ' '
+		claimantBand[i] = ' '
+		overlapBand[i] = ' '
+		respondentBand[i] = ' '
 	}
+	setMarker := func(value int, marker rune, label string) {
+		x := position(value)
+		axis[x] = marker
+		start := max(0, min(barWidth-len([]rune(label)), x-len([]rune(label))/2))
+		for i, r := range []rune(label) {
+			labels[start+i] = r
+		}
+	}
+	setMarker(chart.respondentOffer, '●', "R offer")
+	setMarker(chart.claimantMinimum, '▲', "C min")
+	setMarker(chart.respondentMaximum, '▲', "R max")
+	setMarker(chart.claimantTarget, '●', "C tgt")
 	zopaStart, zopaEnd := position(chart.claimantMinimum), position(chart.respondentMaximum)
+	claimantStart, claimantEnd := position(chart.claimantMinimum), position(chart.claimantTarget)
+	respondentStart, respondentEnd := position(chart.respondentOffer), position(chart.respondentMaximum)
 	if zopaStart <= zopaEnd {
 		for x := zopaStart + 1; x < zopaEnd; x++ {
 			axis[x] = '═'
+		}
+	}
+	for x := claimantStart; x <= claimantEnd && x < barWidth; x++ {
+		claimantBand[x] = '▒'
+	}
+	for x := respondentStart; x <= respondentEnd && x < barWidth; x++ {
+		respondentBand[x] = '░'
+	}
+	if zopaStart <= zopaEnd {
+		for x := zopaStart; x <= zopaEnd && x < barWidth; x++ {
+			overlapBand[x] = '▓'
 		}
 	}
 	overlap := "No ZOPA"
@@ -1656,8 +1761,11 @@ func renderZOPA(chart zopaChart, width int) []string {
 	return []string{
 		"Settlement range · " + overlap,
 		string(axis),
-		fmt.Sprintf("R offer %s   R max %s", money(chart.respondentOffer), money(chart.respondentMaximum)),
-		fmt.Sprintf("C minimum %s   C target %s", money(chart.claimantMinimum), money(chart.claimantTarget)),
+		string(claimantBand),
+		string(overlapBand),
+		string(respondentBand),
+		string(labels),
+		fmt.Sprintf("R offer %s    R max %s    C min %s    C tgt %s", money(chart.respondentOffer), money(chart.respondentMaximum), money(chart.claimantMinimum), money(chart.claimantTarget)),
 	}
 }
 
@@ -1674,9 +1782,64 @@ func (e *editor) cursorVisualRow(rows []visualRow) int {
 	return 0
 }
 
+func (e *editor) putCodeLine(left, row int, vr visualRow, style tcell.Style, maxWidth int) {
+	runes := []rune(vr.text)
+	isFence := strings.HasPrefix(vr.text, "┌") || strings.HasPrefix(vr.text, "└")
+	for i := 0; i < len(runes); i++ {
+		if left+i >= maxWidth {
+			break
+		}
+		s := style
+		if !isFence {
+			srcX := i - 2
+			if srcX < 0 {
+				srcX = 0
+			}
+			if e.positionSelected(srcX, vr.y) {
+				s = s.Background(tcell.ColorDodgerBlue).Foreground(tcell.ColorWhite).Bold(true)
+			} else if e.positionMatchesSearch(srcX, vr.y) {
+				s = s.Background(tcell.ColorDarkGoldenrod).Foreground(tcell.ColorWhite)
+			}
+		} else {
+			if e.positionSelected(0, vr.y) {
+				s = s.Background(tcell.ColorDodgerBlue).Foreground(tcell.ColorWhite).Bold(true)
+			}
+		}
+		e.screen.SetContent(left+i, row, runes[i], nil, s)
+	}
+}
+
 func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width int) {
 	if _, _, ok := e.codeFenceBounds(vr.y); ok {
 		style := tcell.StyleDefault.Foreground(tcell.ColorLightGoldenrodYellow).Background(tcell.ColorDarkSlateGray)
+		e.putCodeLine(left, row, vr, style, left+width)
+		return
+	}
+	if start, end, ok := e.zopaFenceBounds(vr.y); ok && (e.y < start || e.y > end) {
+		style := tcell.StyleDefault.Background(e.theme.background)
+		if e.positionSelected(0, vr.y) {
+			style = style.Background(tcell.ColorDodgerBlue).Foreground(tcell.ColorWhite).Bold(true)
+		} else {
+			switch vr.start {
+			case 0:
+				style = style.Foreground(tcell.ColorLightGoldenrodYellow).Bold(true)
+			case 1:
+				style = style.Foreground(tcell.ColorLightSeaGreen)
+			case 2:
+				style = style.Foreground(tcell.ColorDarkSeaGreen)
+			default:
+				switch vr.start {
+				case 3:
+					style = style.Foreground(tcell.ColorLightSkyBlue)
+				case 4:
+					style = style.Foreground(tcell.ColorLightCoral)
+				case 5:
+					style = style.Foreground(tcell.ColorPaleTurquoise)
+				default:
+					style = style.Foreground(tcell.ColorLightGreen)
+				}
+			}
+		}
 		e.put(left, row, vr.text, style, left+width)
 		return
 	}
@@ -1698,6 +1861,16 @@ func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width
 func (e *editor) codeFenceBounds(y int) (int, int, bool) {
 	for start := y; start >= 0; start-- {
 		_, end, ok := e.codeFence(start)
+		if ok && y <= end {
+			return start, end, true
+		}
+	}
+	return 0, 0, false
+}
+
+func (e *editor) zopaFenceBounds(y int) (int, int, bool) {
+	for start := y; start >= 0; start-- {
+		_, end, ok := e.zopaBlock(start)
 		if ok && y <= end {
 			return start, end, true
 		}
@@ -1746,7 +1919,7 @@ func (e *editor) drawLine(left, row, y int, line string, current bool, width int
 	if current {
 		e.putSelected(left, row, line, style, width, y, 0)
 	} else {
-		e.putInline(left, row, line, style, left+width)
+		e.putInline(left, row, line, style, left+width, y, 0)
 	}
 }
 
@@ -1862,7 +2035,7 @@ func (e *editor) drawTableLine(left, row, y, maxWidth int, style tcell.Style) {
 		if col < len(cells) {
 			value = truncateInlineCell(cells[col], width)
 		}
-		e.putInline(x, row, value, style, x+width)
+		e.putInline(x, row, value, style, x+width, y, 0)
 		x += width
 		e.screen.SetContent(x, row, ' ', nil, style)
 		x++
@@ -1962,17 +2135,32 @@ func (e *editor) put(x, y int, text string, style tcell.Style, maxWidth int) {
 	}
 }
 
-func (e *editor) putInline(x, screenY int, text string, base tcell.Style, maxWidth int) {
+func (e *editor) putInline(x, screenY int, text string, base tcell.Style, maxWidth int, y int, start int) {
 	runes := []rune(text)
 	for i := 0; i < len(runes) && x < maxWidth; {
+		s := base
+		srcX := start + i
+		if e.positionSelected(srcX, y) {
+			s = s.Background(tcell.ColorDodgerBlue).Foreground(tcell.ColorWhite).Bold(true)
+		} else if e.positionMatchesSearch(srcX, y) {
+			s = s.Background(tcell.ColorDarkGoldenrod).Foreground(tcell.ColorWhite)
+		}
+
 		if runes[i] == '`' {
 			if end := closingRune(runes, i+1, '`'); end > i+1 {
-				codeStyle := base.Foreground(tcell.ColorLightGoldenrodYellow).Background(tcell.ColorDarkSlateGray)
-				for _, r := range runes[i+1 : end] {
+				codeStyle := s.Foreground(tcell.ColorLightGoldenrodYellow).Background(tcell.ColorDarkSlateGray)
+				for idx, r := range runes[i+1 : end] {
 					if x >= maxWidth {
 						break
 					}
-					e.screen.SetContent(x, screenY, r, nil, codeStyle)
+					rStyle := codeStyle
+					rSrcX := start + i + 1 + idx
+					if e.positionSelected(rSrcX, y) {
+						rStyle = rStyle.Background(tcell.ColorDodgerBlue).Foreground(tcell.ColorWhite).Bold(true)
+					} else if e.positionMatchesSearch(rSrcX, y) {
+						rStyle = rStyle.Background(tcell.ColorDarkGoldenrod).Foreground(tcell.ColorWhite)
+					}
+					e.screen.SetContent(x, screenY, r, nil, rStyle)
 					x++
 				}
 				i = end + 1
@@ -1981,17 +2169,24 @@ func (e *editor) putInline(x, screenY int, text string, base tcell.Style, maxWid
 		}
 		marker, styled, end := emphasisAt(runes, i)
 		if marker > 0 {
-			for _, r := range runes[i+marker : end] {
+			for idx, r := range runes[i+marker : end] {
 				if x >= maxWidth {
 					break
 				}
-				e.screen.SetContent(x, screenY, r, nil, styled(base))
+				rStyle := styled(s)
+				rSrcX := start + i + marker + idx
+				if e.positionSelected(rSrcX, y) {
+					rStyle = rStyle.Background(tcell.ColorDodgerBlue).Foreground(tcell.ColorWhite).Bold(true)
+				} else if e.positionMatchesSearch(rSrcX, y) {
+					rStyle = rStyle.Background(tcell.ColorDarkGoldenrod).Foreground(tcell.ColorWhite)
+				}
+				e.screen.SetContent(x, screenY, r, nil, rStyle)
 				x++
 			}
 			i = end + marker
 			continue
 		}
-		e.screen.SetContent(x, screenY, runes[i], nil, base)
+		e.screen.SetContent(x, screenY, runes[i], nil, s)
 		x++
 		i++
 	}

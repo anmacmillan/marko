@@ -239,6 +239,43 @@ func TestJamesDeanAwardTableRendersStyledAndAligned(t *testing.T) {
 	}
 }
 
+func TestRenderedZOPAUsesColor(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(80, 8)
+	e := &editor{
+		screen: screen,
+		lines: []string{
+			"```zopa",
+			"Claimant target: 100000",
+			"Claimant minimum: 80000",
+			"Respondent maximum: 95000",
+			"Respondent offer: 70000",
+			"```",
+			"",
+		},
+		y:     6,
+		theme: themeByName("calm"),
+	}
+	rows := e.visualRows(80)
+	for row, vr := range rows[:7] {
+		e.drawVisualLine(0, row, vr, false, 80)
+	}
+	_, _, headerStyle, _ := screen.GetContent(0, 0)
+	fg, _, attrs := headerStyle.Decompose()
+	if fg != tcell.ColorLightGoldenrodYellow || attrs&tcell.AttrBold == 0 {
+		t.Fatalf("zopa header style = fg %v attrs %v", fg, attrs)
+	}
+	_, _, overlapStyle, _ := screen.GetContent(0, 3)
+	fg, _, _ = overlapStyle.Decompose()
+	if fg != tcell.ColorLightSkyBlue {
+		t.Fatalf("zopa overlap style = fg %v", fg)
+	}
+}
+
 func TestFullDrawPipelineRendersBoldTableRows(t *testing.T) {
 	screen := tcell.NewSimulationScreen("UTF-8")
 	if err := screen.Init(); err != nil {
@@ -378,7 +415,7 @@ func TestZOPABlockRendersOutsideFence(t *testing.T) {
 		y: 6,
 	}
 	rows := e.visualRows(70)
-	if got, want := len(rows), 5; got != want {
+	if got, want := len(rows), 8; got != want {
 		t.Fatalf("visualRows() = %d rows, want %d", got, want)
 	}
 	if got, want := rows[0].text, "Settlement range · ZOPA £80k–£95k"; got != want {
@@ -386,6 +423,12 @@ func TestZOPABlockRendersOutsideFence(t *testing.T) {
 	}
 	if !strings.Contains(rows[1].text, "═") {
 		t.Fatalf("ZOPA axis has no overlap marker: %q", rows[1].text)
+	}
+	if !strings.Contains(rows[2].text, "▒") || !strings.Contains(rows[3].text, "▓") || !strings.Contains(rows[4].text, "░") {
+		t.Fatalf("ZOPA bands missing: %q | %q | %q", rows[2].text, rows[3].text, rows[4].text)
+	}
+	if !strings.Contains(rows[5].text, "R offer") || !strings.Contains(rows[5].text, "C tgt") {
+		t.Fatalf("ZOPA labels missing: %q", rows[5].text)
 	}
 }
 
@@ -548,7 +591,7 @@ func TestInlineCodeRendering(t *testing.T) {
 	defer screen.Fini()
 	screen.SetSize(40, 3)
 	e := &editor{screen: screen}
-	e.putInline(0, 0, "Use `marko note.md` now", tcell.StyleDefault, 40)
+	e.putInline(0, 0, "Use `marko note.md` now", tcell.StyleDefault, 40, 0, 0)
 	if got, want := strings.TrimRight(simulationLine(screen, 0, 40), " "), "Use marko note.md now"; got != want {
 		t.Fatalf("inline code rendering = %q, want %q", got, want)
 	}

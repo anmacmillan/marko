@@ -12,6 +12,12 @@ to manage. Your files remain ordinary Markdown.
 
 ![Simulated Marko terminal screenshot](docs/marko-screenshot.svg)
 
+### Sample graphics
+
+![Rendered table sample](docs/table-sample.svg)
+
+![ZOPA chart sample](docs/zopa-sample.svg)
+
 The screenshot shows both states: a rendered table in the editor and the raw
 Markdown source that appears when you enter it. There is no preview pane.
 

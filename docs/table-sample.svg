@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="220" viewBox="0 0 920 220">
+  <rect width="920" height="220" rx="18" fill="#07110a"/>
+  <text x="32" y="36" fill="#7ff29d" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18">Rendered table example</text>
+  <rect x="32" y="56" width="856" height="126" rx="10" fill="#0b1710" stroke="#2d5f3b" stroke-width="1.5"/>
+  <text x="54" y="90" fill="#9ef7b4" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16">Head</text>
+  <text x="520" y="90" fill="#9ef7b4" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16">Realistic award</text>
+  <line x1="460" y1="70" x2="460" y2="168" stroke="#2d5f3b" stroke-width="2"/>
+  <line x1="54" y1="102" x2="868" y2="102" stroke="#2d5f3b" stroke-width="1"/>
+  <text x="54" y="132" fill="#7ff29d" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16">Sub-total</text>
+  <text x="520" y="132" fill="#7ff29d" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16">£236,304</text>
+  <text x="54" y="160" fill="#7ff29d" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16">Total gross</text>
+  <text x="520" y="160" fill="#7ff29d" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16">~£251,000</text>
+</svg>

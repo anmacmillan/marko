@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="220" viewBox="0 0 920 220">
+  <rect width="920" height="220" rx="18" fill="#07110a"/>
+  <text x="32" y="36" fill="#7ff29d" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18">ZOPA range chart</text>
+  <rect x="32" y="56" width="856" height="126" rx="10" fill="#0b1710" stroke="#2d5f3b" stroke-width="1.5"/>
+  <text x="54" y="90" fill="#9ef7b4" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16">R offer</text>
+  <text x="180" y="90" fill="#9ef7b4" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16">ZOPA</text>
+  <text x="608" y="90" fill="#9ef7b4" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16">C target</text>
+  <line x1="72" y1="124" x2="848" y2="124" stroke="#2d5f3b" stroke-width="2"/>
+  <line x1="190" y1="112" x2="548" y2="112" stroke="#7ff29d" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="120" cy="124" r="8" fill="#7ff29d"/>
+  <circle cx="274" cy="124" r="8" fill="#7ff29d"/>
+  <circle cx="548" cy="124" r="8" fill="#7ff29d"/>
+  <circle cx="716" cy="124" r="8" fill="#7ff29d"/>
+  <text x="54" y="160" fill="#7ff29d" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16">Claimant minimum £80k</text>
+  <text x="54" y="186" fill="#7ff29d" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16">Respondent maximum £95k</text>
+</svg>
