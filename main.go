@@ -1705,67 +1705,75 @@ func (e *editor) zopaBlock(start int) (zopaChart, int, bool) {
 func renderZOPA(chart zopaChart, width int) []string {
 	minValue := min(chart.respondentOffer, chart.claimantMinimum)
 	maxValue := max(chart.claimantTarget, chart.respondentMaximum)
-	barWidth := max(36, min(width-2, 72))
+	barWidth := max(36, min(width-16, 72))
 	position := func(value int) int {
 		if maxValue == minValue {
 			return 0
 		}
 		return (value - minValue) * (barWidth - 1) / (maxValue - minValue)
 	}
-	axis := []rune(strings.Repeat("─", barWidth))
-	claimantBand := make([]rune, barWidth)
-	overlapBand := make([]rune, barWidth)
+
 	respondentBand := make([]rune, barWidth)
-	labels := make([]rune, barWidth)
-	for i := range labels {
-		labels[i] = ' '
-		claimantBand[i] = ' '
-		overlapBand[i] = ' '
+	claimantBand := make([]rune, barWidth)
+	axis := make([]rune, barWidth)
+
+	for i := range axis {
+		axis[i] = '─'
 		respondentBand[i] = ' '
+		claimantBand[i] = ' '
 	}
+
+	rStart, rEnd := position(chart.respondentOffer), position(chart.respondentMaximum)
+	cStart, cEnd := position(chart.claimantMinimum), position(chart.claimantTarget)
+	zStart, zEnd := position(chart.claimantMinimum), position(chart.respondentMaximum)
+
+	for x := rStart; x <= rEnd && x < barWidth; x++ {
+		respondentBand[x] = '░'
+	}
+	for x := cStart; x <= cEnd && x < barWidth; x++ {
+		claimantBand[x] = '▒'
+	}
+	if zStart <= zEnd {
+		for x := zStart; x <= zEnd && x < barWidth; x++ {
+			if x >= rStart && x <= rEnd {
+				respondentBand[x] = '▓'
+			}
+			if x >= cStart && x <= cEnd {
+				claimantBand[x] = '▓'
+			}
+		}
+	}
+
+	axisLabels := make([]rune, barWidth)
+	for i := range axisLabels {
+		axisLabels[i] = ' '
+	}
+
 	setMarker := func(value int, marker rune, label string) {
 		x := position(value)
 		axis[x] = marker
 		start := max(0, min(barWidth-len([]rune(label)), x-len([]rune(label))/2))
 		for i, r := range []rune(label) {
-			labels[start+i] = r
+			axisLabels[start+i] = r
 		}
 	}
+
 	setMarker(chart.respondentOffer, '●', "R offer")
 	setMarker(chart.claimantMinimum, '▲', "C min")
 	setMarker(chart.respondentMaximum, '▲', "R max")
 	setMarker(chart.claimantTarget, '●', "C tgt")
-	zopaStart, zopaEnd := position(chart.claimantMinimum), position(chart.respondentMaximum)
-	claimantStart, claimantEnd := position(chart.claimantMinimum), position(chart.claimantTarget)
-	respondentStart, respondentEnd := position(chart.respondentOffer), position(chart.respondentMaximum)
-	if zopaStart <= zopaEnd {
-		for x := zopaStart + 1; x < zopaEnd; x++ {
-			axis[x] = '═'
-		}
-	}
-	for x := claimantStart; x <= claimantEnd && x < barWidth; x++ {
-		claimantBand[x] = '▒'
-	}
-	for x := respondentStart; x <= respondentEnd && x < barWidth; x++ {
-		respondentBand[x] = '░'
-	}
-	if zopaStart <= zopaEnd {
-		for x := zopaStart; x <= zopaEnd && x < barWidth; x++ {
-			overlapBand[x] = '▓'
-		}
-	}
+
 	overlap := "No ZOPA"
 	if chart.claimantMinimum <= chart.respondentMaximum {
 		overlap = fmt.Sprintf("ZOPA %s–%s", money(chart.claimantMinimum), money(chart.respondentMaximum))
 	}
+
 	return []string{
 		"Settlement range · " + overlap,
-		string(axis),
-		string(claimantBand),
-		string(overlapBand),
-		string(respondentBand),
-		string(labels),
-		fmt.Sprintf("R offer %s    R max %s    C min %s    C tgt %s", money(chart.respondentOffer), money(chart.respondentMaximum), money(chart.claimantMinimum), money(chart.claimantTarget)),
+		"Respondent ░  " + string(respondentBand),
+		"Claimant   ▒  " + string(claimantBand),
+		"              " + string(axis),
+		"              " + string(axisLabels),
 	}
 }
 
@@ -1822,22 +1830,15 @@ func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width
 		} else {
 			switch vr.start {
 			case 0:
-				style = style.Foreground(tcell.ColorLightGoldenrodYellow).Bold(true)
+				style = style.Foreground(e.theme.heading3).Bold(true)
 			case 1:
 				style = style.Foreground(tcell.ColorLightSeaGreen)
 			case 2:
-				style = style.Foreground(tcell.ColorDarkSeaGreen)
-			default:
-				switch vr.start {
-				case 3:
-					style = style.Foreground(tcell.ColorLightSkyBlue)
-				case 4:
-					style = style.Foreground(tcell.ColorLightCoral)
-				case 5:
-					style = style.Foreground(tcell.ColorPaleTurquoise)
-				default:
-					style = style.Foreground(tcell.ColorLightGreen)
-				}
+				style = style.Foreground(tcell.ColorLightCoral)
+			case 3:
+				style = style.Foreground(tcell.ColorLightYellow)
+			case 4:
+				style = style.Foreground(tcell.ColorGray)
 			}
 		}
 		e.put(left, row, vr.text, style, left+width)

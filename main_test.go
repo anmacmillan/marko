@@ -261,7 +261,7 @@ func TestRenderedZOPAUsesColor(t *testing.T) {
 		theme: themeByName("calm"),
 	}
 	rows := e.visualRows(80)
-	for row, vr := range rows[:7] {
+	for row, vr := range rows[:5] {
 		e.drawVisualLine(0, row, vr, false, 80)
 	}
 	_, _, headerStyle, _ := screen.GetContent(0, 0)
@@ -269,10 +269,15 @@ func TestRenderedZOPAUsesColor(t *testing.T) {
 	if fg != tcell.ColorLightGoldenrodYellow || attrs&tcell.AttrBold == 0 {
 		t.Fatalf("zopa header style = fg %v attrs %v", fg, attrs)
 	}
-	_, _, overlapStyle, _ := screen.GetContent(0, 3)
-	fg, _, _ = overlapStyle.Decompose()
-	if fg != tcell.ColorLightSkyBlue {
-		t.Fatalf("zopa overlap style = fg %v", fg)
+	_, _, respondentStyle, _ := screen.GetContent(0, 1)
+	fg, _, _ = respondentStyle.Decompose()
+	if fg != tcell.ColorLightSeaGreen {
+		t.Fatalf("zopa respondent style = fg %v", fg)
+	}
+	_, _, claimantStyle, _ := screen.GetContent(0, 2)
+	fg, _, _ = claimantStyle.Decompose()
+	if fg != tcell.ColorLightCoral {
+		t.Fatalf("zopa claimant style = fg %v", fg)
 	}
 }
 
@@ -415,20 +420,17 @@ func TestZOPABlockRendersOutsideFence(t *testing.T) {
 		y: 6,
 	}
 	rows := e.visualRows(70)
-	if got, want := len(rows), 8; got != want {
+	if got, want := len(rows), 6; got != want {
 		t.Fatalf("visualRows() = %d rows, want %d", got, want)
 	}
 	if got, want := rows[0].text, "Settlement range · ZOPA £80k–£95k"; got != want {
 		t.Fatalf("ZOPA heading = %q, want %q", got, want)
 	}
-	if !strings.Contains(rows[1].text, "═") {
-		t.Fatalf("ZOPA axis has no overlap marker: %q", rows[1].text)
+	if !strings.Contains(rows[1].text, "Respondent") {
+		t.Fatalf("ZOPA has no Respondent row: %q", rows[1].text)
 	}
-	if !strings.Contains(rows[2].text, "▒") || !strings.Contains(rows[3].text, "▓") || !strings.Contains(rows[4].text, "░") {
-		t.Fatalf("ZOPA bands missing: %q | %q | %q", rows[2].text, rows[3].text, rows[4].text)
-	}
-	if !strings.Contains(rows[5].text, "R offer") || !strings.Contains(rows[5].text, "C tgt") {
-		t.Fatalf("ZOPA labels missing: %q", rows[5].text)
+	if !strings.Contains(rows[2].text, "Claimant") {
+		t.Fatalf("ZOPA has no Claimant row: %q", rows[2].text)
 	}
 }
 
