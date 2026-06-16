@@ -257,15 +257,25 @@ func (e *editor) run() {
 				}
 			}
 		case *tcell.EventKey:
+			oldStart, oldEnd := e.paragraphBounds(e.y)
+			wasFocusMode := e.focusMode
 			e.lastAction, e.focusMode, e.manualScroll = time.Now(), false, false
 			if e.key(ev) {
 				return
 			}
+			if wasFocusMode && e.y >= oldStart && e.y <= oldEnd {
+				e.focusMode = true
+			}
 		case *tcell.EventMouse:
+			oldStart, oldEnd := e.paragraphBounds(e.y)
+			wasFocusMode := e.focusMode
 			if ev.Buttons() != tcell.ButtonNone {
 				e.lastAction, e.focusMode = time.Now(), false
 			}
 			e.mouse(ev)
+			if wasFocusMode && e.y >= oldStart && e.y <= oldEnd {
+				e.focusMode = true
+			}
 		case *tcell.EventClipboard:
 			if e.waitingForPaste {
 				e.insertText(string(ev.Data()))
@@ -1536,30 +1546,29 @@ func isParagraphBoundary(line string) bool {
 	return false
 }
 
-func (e *editor) focusedLine(y int) bool {
-	if !e.focusMode {
-		return y == e.y
+func (e *editor) paragraphBounds(y int) (int, int) {
+	if y < 0 || y >= len(e.lines) {
+		return y, y
 	}
-	if start, end, ok := e.codeFenceBounds(e.y); ok {
-		return y >= start && y <= end
+	if start, end, ok := e.codeFenceBounds(y); ok {
+		return start, end
 	}
-	if e.inTable(e.y) {
-		start, end := e.tableBounds(e.y)
-		return y >= start && y <= end
+	if e.inTable(y) {
+		return e.tableBounds(y)
 	}
-	if start, end, ok := e.zopaFenceBounds(e.y); ok {
-		return y >= start && y <= end
+	if start, end, ok := e.zopaFenceBounds(y); ok {
+		return start, end
 	}
-	if start, end, ok := e.barChartFenceBounds(e.y); ok {
-		return y >= start && y <= end
+	if start, end, ok := e.barChartFenceBounds(y); ok {
+		return start, end
 	}
 
-	currentLine := e.lines[e.y]
+	currentLine := e.lines[y]
 	if isParagraphBoundary(currentLine) {
-		return y == e.y
+		return y, y
 	}
 
-	start, end := e.y, e.y
+	start, end := y, y
 	for start > 0 && !isParagraphBoundary(e.lines[start-1]) {
 		if _, _, ok := e.codeFenceBounds(start-1); ok {
 			break
@@ -1590,6 +1599,14 @@ func (e *editor) focusedLine(y int) bool {
 		}
 		end++
 	}
+	return start, end
+}
+
+func (e *editor) focusedLine(y int) bool {
+	if !e.focusMode {
+		return y == e.y
+	}
+	start, end := e.paragraphBounds(e.y)
 	return y >= start && y <= end
 }
 
