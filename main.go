@@ -262,7 +262,9 @@ func (e *editor) run() {
 				return
 			}
 		case *tcell.EventMouse:
-			e.lastAction, e.focusMode = time.Now(), false
+			if ev.Buttons() != tcell.ButtonNone {
+				e.lastAction, e.focusMode = time.Now(), false
+			}
 			e.mouse(ev)
 		case *tcell.EventClipboard:
 			if e.waitingForPaste {
