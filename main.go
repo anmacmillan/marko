@@ -296,12 +296,32 @@ func (e *editor) mouse(ev *tcell.EventMouse) {
 	}
 	x, sy := ev.Position()
 	w, h := e.screen.Size()
-	if sy >= h-1 {
-		return
+	statusRows := 1
+	if e.focusMode {
+		statusRows = 0
 	}
+	bodyH := max(1, h-statusRows)
+
 	left, contentWidth := writingArea(w)
 	rows := e.visualRows(contentWidth)
-	index := min(len(rows)-1, max(0, e.top+sy))
+
+	targetSy := sy
+	if targetSy < 0 {
+		targetSy = 0
+		if buttons&tcell.Button1 != 0 {
+			e.top = max(0, e.top-1)
+			e.manualScroll = true
+		}
+	} else if targetSy >= bodyH {
+		targetSy = bodyH - 1
+		if buttons&tcell.Button1 != 0 {
+			maxTop := manualScrollMaxTop(len(rows))
+			e.top = min(e.top+1, maxTop)
+			e.manualScroll = true
+		}
+	}
+
+	index := min(len(rows)-1, max(0, e.top+targetSy))
 	y := rows[index].y
 	x = min(runeLen(e.lines[y]), max(0, rows[index].start+x-left))
 	if buttons&tcell.Button1 != 0 {
