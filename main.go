@@ -1058,7 +1058,11 @@ func (e *editor) expandChartFence() bool {
 	lines := append([]string(nil), template...)
 	e.lines = append(e.lines[:e.y+1], append(lines, e.lines[e.y+1:]...)...)
 	e.y++
-	e.x = runeLen("Claimant target: ")
+	if name == "zopa" {
+		e.x = runeLen("Claimant target: ")
+	} else if name == "chart" {
+		e.x = runeLen("Option A: ")
+	}
 	e.dirty = true
 	e.status = "Chart created. Edit the example values, then press Tab."
 	return true
@@ -1070,6 +1074,12 @@ var chartTemplates = map[string][]string{
 		"Claimant minimum: 80000",
 		"Respondent maximum: 95000",
 		"Respondent offer: 70000",
+		"```",
+	},
+	"chart": {
+		"Option A: 80",
+		"Option B: 120",
+		"Option C: 45",
 		"```",
 	},
 }
@@ -1445,7 +1455,7 @@ func (e *editor) draw() {
 		mark = " *"
 	}
 	cwd, _ := os.Getwd()
-	status := fmt.Sprintf(" %s%s  Ln %d, Col %d  %s  %s", name, mark, e.y+1, e.x+1, cwd, e.status)
+	status := fmt.Sprintf(" %s%s  Ln %d, Col %d  %s  [%s]  %s", name, mark, e.y+1, e.x+1, cwd, e.stats(), e.status)
 	if e.prompt != "" {
 		status = " " + e.prompt + e.promptValue
 	}
@@ -1518,6 +1528,9 @@ func (e *editor) focusedLine(y int) bool {
 	if start, end, ok := e.zopaFenceBounds(e.y); ok {
 		return y >= start && y <= end
 	}
+	if start, end, ok := e.barChartFenceBounds(e.y); ok {
+		return y >= start && y <= end
+	}
 
 	currentLine := e.lines[e.y]
 	if isParagraphBoundary(currentLine) {
@@ -1535,6 +1548,9 @@ func (e *editor) focusedLine(y int) bool {
 		if _, _, ok := e.zopaFenceBounds(start-1); ok {
 			break
 		}
+		if _, _, ok := e.barChartFenceBounds(start-1); ok {
+			break
+		}
 		start--
 	}
 	for end+1 < len(e.lines) && !isParagraphBoundary(e.lines[end+1]) {
@@ -1545,6 +1561,9 @@ func (e *editor) focusedLine(y int) bool {
 			break
 		}
 		if _, _, ok := e.zopaFenceBounds(end+1); ok {
+			break
+		}
+		if _, _, ok := e.barChartFenceBounds(end+1); ok {
 			break
 		}
 		end++
@@ -1608,6 +1627,13 @@ func (e *editor) visualRows(width int) []visualRow {
 		line := e.lines[y]
 		if chart, end, ok := e.zopaBlock(y); ok && (e.y < y || e.y > end) {
 			for i, text := range renderZOPA(chart, width) {
+				rows = append(rows, visualRow{y: y, start: i, text: text})
+			}
+			y = end
+			continue
+		}
+		if cb, end, ok := e.chartBlock(y); ok && (e.y < y || e.y > end) {
+			for i, text := range renderChart(cb, width) {
 				rows = append(rows, visualRow{y: y, start: i, text: text})
 			}
 			y = end
@@ -1781,6 +1807,175 @@ func money(value int) string {
 	return "£" + strconv.Itoa(value/1000) + "k"
 }
 
+type chartBlock struct {
+	title  string
+	items  []chartItem
+	maxVal int
+}
+
+type chartItem struct {
+	label  string
+	value  int
+	rawVal string
+}
+
+func (e *editor) chartBlock(start int) (chartBlock, int, bool) {
+	if start < 0 || start >= len(e.lines) || !strings.HasPrefix(strings.TrimSpace(e.lines[start]), "```chart") {
+		return chartBlock{}, start, false
+	}
+	title := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(e.lines[start]), "```chart"))
+	if title == "" {
+		title = "Visual Chart"
+	}
+	items := []chartItem{}
+	maxVal := 0
+	for end := start + 1; end < len(e.lines); end++ {
+		line := strings.TrimSpace(e.lines[end])
+		if line == "```" {
+			return chartBlock{title: title, items: items, maxVal: maxVal}, end, len(items) > 0
+		}
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		raw := strings.TrimSpace(value)
+		number := strings.NewReplacer("£", "", ",", "", "_", "", " ", "").Replace(raw)
+		if parsed, err := strconv.Atoi(number); err == nil {
+			items = append(items, chartItem{label: strings.TrimSpace(key), value: parsed, rawVal: raw})
+			if parsed > maxVal {
+				maxVal = parsed
+			}
+		}
+	}
+	return chartBlock{}, start, false
+}
+
+func (e *editor) barChartFenceBounds(y int) (int, int, bool) {
+	for start := y; start >= 0; start-- {
+		_, end, ok := e.chartBlock(start)
+		if ok && y <= end {
+			return start, end, true
+		}
+	}
+	return 0, 0, false
+}
+
+func renderChart(cb chartBlock, width int) []string {
+	rows := []string{
+		"📊 " + cb.title,
+	}
+	labelWidth := 0
+	for _, item := range cb.items {
+		if len(item.label) > labelWidth {
+			labelWidth = len(item.label)
+		}
+	}
+	if labelWidth > 24 {
+		labelWidth = 24
+	}
+	barMaxWidth := max(16, min(width-labelWidth-16, 48))
+	for _, item := range cb.items {
+		lbl := item.label
+		if len(lbl) > labelWidth {
+			lbl = lbl[:labelWidth-3] + "..."
+		}
+		lbl = lbl + strings.Repeat(" ", labelWidth-len(lbl))
+		barW := 0
+		if cb.maxVal > 0 {
+			barW = item.value * barMaxWidth / cb.maxVal
+		}
+		if barW < 1 && item.value > 0 {
+			barW = 1
+		}
+		barStr := strings.Repeat("█", barW) + strings.Repeat("░", barMaxWidth-barW)
+		valStr := item.rawVal
+		if item.value >= 1000 && item.value%1000 == 0 {
+			valStr = "£" + strconv.Itoa(item.value/1000) + "k"
+		}
+		rows = append(rows, fmt.Sprintf("%s  %s  %s", lbl, barStr, valStr))
+	}
+	return rows
+}
+
+func isRule(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if len(trimmed) < 3 {
+		return false
+	}
+	first := trimmed[0]
+	if first != '-' && first != '*' && first != '_' {
+		return false
+	}
+	for _, r := range trimmed {
+		if r != rune(first) && r != ' ' {
+			return false
+		}
+	}
+	return true
+}
+
+func renderRule(width int) string {
+	symbol := " ❦ "
+	ruleWidth := min(40, width)
+	sideWidth := (ruleWidth - len([]rune(symbol))) / 2
+	if sideWidth < 1 {
+		sideWidth = 1
+	}
+	side := strings.Repeat("─", sideWidth)
+	return side + symbol + side
+}
+
+func (e *editor) sectionChecklistProgress(y int, level int) (string, bool) {
+	checked, total := 0, 0
+	for lineY := y + 1; lineY < len(e.lines); lineY++ {
+		if l, _, ok := heading(e.lines[lineY]); ok && l <= level {
+			break
+		}
+		trimmed := strings.TrimSpace(e.lines[lineY])
+		if strings.HasPrefix(trimmed, "- [ ]") || strings.HasPrefix(trimmed, "* [ ]") {
+			total++
+		} else if strings.HasPrefix(trimmed, "- [x]") || strings.HasPrefix(trimmed, "* [x]") || strings.HasPrefix(trimmed, "- [X]") || strings.HasPrefix(trimmed, "* [X]") {
+			total++
+			checked++
+		}
+	}
+	if total == 0 {
+		return "", false
+	}
+	percent := checked * 100 / total
+	barWidth := 6
+	filled := percent * barWidth / 100
+	bar := make([]rune, barWidth)
+	for i := 0; i < barWidth; i++ {
+		if i < filled {
+			bar[i] = '■'
+		} else {
+			bar[i] = '□'
+		}
+	}
+	return fmt.Sprintf("[%s] %d%% (%d/%d)", string(bar), percent, checked, total), true
+}
+
+func (e *editor) stats() string {
+	words := 0
+	tasksDone, tasksTotal := 0, 0
+	for _, line := range e.lines {
+		words += len(strings.Fields(line))
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "- [ ]") || strings.HasPrefix(trimmed, "* [ ]") {
+			tasksTotal++
+		} else if strings.HasPrefix(trimmed, "- [x]") || strings.HasPrefix(trimmed, "* [x]") || strings.HasPrefix(trimmed, "- [X]") || strings.HasPrefix(trimmed, "* [X]") {
+			tasksTotal++
+			tasksDone++
+		}
+	}
+	statsStr := fmt.Sprintf("%d words", words)
+	if tasksTotal > 0 {
+		statsStr += fmt.Sprintf("  %d/%d tasks (%d%%)", tasksDone, tasksTotal, tasksDone*100/tasksTotal)
+	}
+	return statsStr
+}
+
 func (e *editor) cursorVisualRow(rows []visualRow) int {
 	for i := len(rows) - 1; i >= 0; i-- {
 		if rows[i].y == e.y && rows[i].start <= e.x {
@@ -1844,6 +2039,33 @@ func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width
 		e.put(left, row, vr.text, style, left+width)
 		return
 	}
+	if start, end, ok := e.barChartFenceBounds(vr.y); ok && (e.y < start || e.y > end) {
+		style := tcell.StyleDefault.Background(e.theme.background)
+		if e.positionSelected(0, vr.y) {
+			style = style.Background(tcell.ColorDodgerBlue).Foreground(tcell.ColorWhite).Bold(true)
+		} else {
+			if vr.start == 0 {
+				style = style.Foreground(e.theme.heading3).Bold(true)
+			} else {
+				style = style.Foreground(e.theme.text)
+			}
+		}
+		e.put(left, row, vr.text, style, left+width)
+		return
+	}
+	if isRule(vr.text) && !current {
+		style := tcell.StyleDefault.Foreground(e.theme.quote)
+		if e.positionSelected(0, vr.y) {
+			style = style.Background(tcell.ColorDodgerBlue).Foreground(tcell.ColorWhite).Bold(true)
+		}
+		ruleText := renderRule(width)
+		padding := (width - len([]rune(ruleText))) / 2
+		if padding < 0 {
+			padding = 0
+		}
+		e.put(left+padding, row, ruleText, style, left+width)
+		return
+	}
 	if e.inTable(vr.y) && !e.cursorInSameTable(vr.y) {
 		e.drawLine(left, row, vr.y, e.lines[vr.y], current, width)
 		return
@@ -1880,6 +2102,16 @@ func (e *editor) zopaFenceBounds(y int) (int, int, bool) {
 }
 
 func (e *editor) drawLine(left, row, y int, line string, current bool, width int) {
+	if isRule(line) && !current {
+		style := tcell.StyleDefault.Foreground(e.theme.quote)
+		ruleText := renderRule(width)
+		padding := (width - len([]rune(ruleText))) / 2
+		if padding < 0 {
+			padding = 0
+		}
+		e.put(left+padding, row, ruleText, style, left+width)
+		return
+	}
 	style := tcell.StyleDefault.Foreground(e.theme.text).Background(e.theme.background)
 	if e.focusMode && !current {
 		style = style.Dim(true)
@@ -1898,6 +2130,9 @@ func (e *editor) drawLine(left, row, y int, line string, current bool, width int
 	}
 	if level, text, ok := heading(line); ok && !current {
 		line = text
+		if progressText, hasChecklist := e.sectionChecklistProgress(y, level); hasChecklist {
+			line = line + "  " + progressText
+		}
 		switch level {
 		case 1:
 			style = style.Bold(true).Underline(true).Foreground(e.theme.heading1)

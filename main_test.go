@@ -434,6 +434,39 @@ func TestZOPABlockRendersOutsideFence(t *testing.T) {
 	}
 }
 
+func TestChartBlockRendering(t *testing.T) {
+	e := &editor{
+		lines: []string{
+			"```chart Project Progress",
+			"Backend API: 80",
+			"Frontend UI: 40",
+			"Testing: 20",
+			"```",
+			"",
+		},
+		y: 5,
+	}
+	rows := e.visualRows(70)
+	if got, want := len(rows), 5; got != want {
+		t.Fatalf("visualRows() = %d rows, want %d", got, want)
+	}
+	if got, want := rows[0].text, "📊 Project Progress"; got != want {
+		t.Fatalf("chart block title = %q, want %q", got, want)
+	}
+	if !strings.Contains(rows[1].text, "Backend API") || !strings.Contains(rows[1].text, "█") {
+		t.Fatalf("chart block row 1 is incorrect: %q", rows[1].text)
+	}
+}
+
+func TestIsRule(t *testing.T) {
+	if !isRule("---") || !isRule("  ***  ") || !isRule("________") {
+		t.Fatal("isRule failed to detect valid rules")
+	}
+	if isRule("--- text") || isRule("abc") || isRule("-") {
+		t.Fatal("isRule detected invalid line as rule")
+	}
+}
+
 func TestZOPABlockShowsSourceWhileEditing(t *testing.T) {
 	e := &editor{
 		lines: []string{
