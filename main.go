@@ -325,24 +325,24 @@ func (e *editor) mouse(ev *tcell.EventMouse) {
 	y := rows[index].y
 	x = min(runeLen(e.lines[y]), max(0, rows[index].start+x-left))
 	if buttons&tcell.Button1 != 0 {
-		if time.Since(e.lastClick) < 400*time.Millisecond && e.clickX == x && e.clickY == y {
-			e.clickCount++
-		} else {
-			e.clickCount = 1
-		}
-		e.lastClick, e.clickX, e.clickY = time.Now(), x, y
-		if e.clickCount >= 3 {
-			e.selectLineAt(y)
-			e.mouseDown = false
-			e.clickCount = 0
-			return
-		}
-		if e.clickCount == 2 {
-			e.selectWordAt(x, y)
-			e.mouseDown = false
-			return
-		}
 		if !e.mouseDown {
+			if time.Since(e.lastClick) < 400*time.Millisecond && e.clickX == x && e.clickY == y {
+				e.clickCount++
+			} else {
+				e.clickCount = 1
+			}
+			e.lastClick, e.clickX, e.clickY = time.Now(), x, y
+			if e.clickCount >= 3 {
+				e.selectLineAt(y)
+				e.mouseDown = false
+				e.clickCount = 0
+				return
+			}
+			if e.clickCount == 2 {
+				e.selectWordAt(x, y)
+				e.mouseDown = false
+				return
+			}
 			e.selX, e.selY = x, y
 			e.mouseDown = true
 		}
