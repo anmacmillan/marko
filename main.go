@@ -67,10 +67,10 @@ type zopaChart struct {
 }
 
 type theme struct {
-	text, heading1, heading2, heading3, table, quote, background, statusBG, statusFG tcell.Color
+	text, heading1, heading2, heading3, table, quote, background, statusBG, statusFG, muted tcell.Color
 }
 
-var themeNames = []string{"calm", "green", "mono", "light"}
+var themeNames = []string{"calm", "green", "mono", "light", "ia-light", "ia-dark"}
 
 const writingWidth = 88
 
@@ -167,13 +167,17 @@ func validTheme(name string) bool {
 func themeByName(name string) theme {
 	switch name {
 	case "green":
-		return theme{tcell.ColorPaleGreen, tcell.ColorLightGreen, tcell.ColorGreen, tcell.ColorDarkSeaGreen, tcell.ColorPaleGreen, tcell.ColorGray, tcell.ColorDefault, tcell.ColorDarkGreen, tcell.ColorWhite}
+		return theme{tcell.ColorPaleGreen, tcell.ColorLightGreen, tcell.ColorGreen, tcell.ColorDarkSeaGreen, tcell.ColorPaleGreen, tcell.ColorGray, tcell.ColorDefault, tcell.ColorDarkGreen, tcell.ColorWhite, tcell.ColorDarkGreen}
 	case "mono":
-		return theme{tcell.ColorSilver, tcell.ColorWhite, tcell.ColorWhite, tcell.ColorSilver, tcell.ColorSilver, tcell.ColorGray, tcell.ColorDefault, tcell.ColorGray, tcell.ColorBlack}
+		return theme{tcell.ColorSilver, tcell.ColorWhite, tcell.ColorWhite, tcell.ColorSilver, tcell.ColorSilver, tcell.ColorGray, tcell.ColorDefault, tcell.ColorGray, tcell.ColorBlack, tcell.ColorDarkGray}
 	case "light":
-		return theme{tcell.ColorBlack, tcell.ColorDarkBlue, tcell.ColorDarkGreen, tcell.ColorDarkGoldenrod, tcell.ColorDarkGreen, tcell.ColorDarkSlateGray, tcell.ColorWhite, tcell.ColorLightGray, tcell.ColorBlack}
+		return theme{tcell.ColorBlack, tcell.ColorDarkBlue, tcell.ColorDarkGreen, tcell.ColorDarkGoldenrod, tcell.ColorDarkGreen, tcell.ColorDarkSlateGray, tcell.ColorWhite, tcell.ColorLightGray, tcell.ColorBlack, tcell.ColorDarkGray}
+	case "ia-light":
+		return theme{tcell.GetColor("#1c1c1e"), tcell.GetColor("#007aff"), tcell.GetColor("#111111"), tcell.GetColor("#3a3a3c"), tcell.GetColor("#007aff"), tcell.GetColor("#8e8e93"), tcell.GetColor("#f5f5f7"), tcell.GetColor("#e5e5ea"), tcell.GetColor("#1c1c1e"), tcell.GetColor("#aeaeb2")}
+	case "ia-dark":
+		return theme{tcell.GetColor("#e5e5ea"), tcell.GetColor("#0a84ff"), tcell.GetColor("#ffffff"), tcell.GetColor("#d1d1d6"), tcell.GetColor("#0a84ff"), tcell.GetColor("#636366"), tcell.GetColor("#161617"), tcell.GetColor("#2c2c2e"), tcell.GetColor("#e5e5ea"), tcell.GetColor("#48484a")}
 	default:
-		return theme{tcell.ColorSilver, tcell.ColorLightSkyBlue, tcell.ColorLightGreen, tcell.ColorLightGoldenrodYellow, tcell.ColorPaleGreen, tcell.ColorGray, tcell.ColorDefault, tcell.ColorDarkSlateGray, tcell.ColorWhite}
+		return theme{tcell.ColorSilver, tcell.ColorLightSkyBlue, tcell.ColorLightGreen, tcell.ColorLightGoldenrodYellow, tcell.ColorPaleGreen, tcell.ColorGray, tcell.ColorDefault, tcell.ColorDarkSlateGray, tcell.ColorWhite, tcell.ColorDarkGray}
 	}
 }
 
@@ -2045,6 +2049,9 @@ func (e *editor) putCodeLine(left, row int, vr visualRow, style tcell.Style, max
 func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width int) {
 	if _, _, ok := e.codeFenceBounds(vr.y); ok {
 		style := tcell.StyleDefault.Foreground(tcell.ColorLightGoldenrodYellow).Background(tcell.ColorDarkSlateGray)
+		if e.focusMode && !current {
+			style = tcell.StyleDefault.Foreground(e.theme.muted).Background(e.theme.background)
+		}
 		e.putCodeLine(left, row, vr, style, left+width)
 		return
 	}
@@ -2053,17 +2060,21 @@ func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width
 		if e.positionSelected(0, vr.y) {
 			style = style.Background(tcell.ColorDodgerBlue).Foreground(tcell.ColorWhite).Bold(true)
 		} else {
-			switch vr.start {
-			case 0:
-				style = style.Foreground(e.theme.heading3).Bold(true)
-			case 1:
-				style = style.Foreground(tcell.ColorLightSeaGreen)
-			case 2:
-				style = style.Foreground(tcell.ColorLightCoral)
-			case 3:
-				style = style.Foreground(tcell.ColorLightYellow)
-			case 4:
-				style = style.Foreground(tcell.ColorGray)
+			if e.focusMode && !current {
+				style = style.Foreground(e.theme.muted)
+			} else {
+				switch vr.start {
+				case 0:
+					style = style.Foreground(e.theme.heading3).Bold(true)
+				case 1:
+					style = style.Foreground(tcell.ColorLightSeaGreen)
+				case 2:
+					style = style.Foreground(tcell.ColorLightCoral)
+				case 3:
+					style = style.Foreground(tcell.ColorLightYellow)
+				case 4:
+					style = style.Foreground(tcell.ColorGray)
+				}
 			}
 		}
 		e.put(left, row, vr.text, style, left+width)
@@ -2074,10 +2085,14 @@ func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width
 		if e.positionSelected(0, vr.y) {
 			style = style.Background(tcell.ColorDodgerBlue).Foreground(tcell.ColorWhite).Bold(true)
 		} else {
-			if vr.start == 0 {
-				style = style.Foreground(e.theme.heading3).Bold(true)
+			if e.focusMode && !current {
+				style = style.Foreground(e.theme.muted)
 			} else {
-				style = style.Foreground(e.theme.text)
+				if vr.start == 0 {
+					style = style.Foreground(e.theme.heading3).Bold(true)
+				} else {
+					style = style.Foreground(e.theme.text)
+				}
 			}
 		}
 		e.put(left, row, vr.text, style, left+width)
@@ -2085,6 +2100,9 @@ func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width
 	}
 	if isRule(vr.text) && !current {
 		style := tcell.StyleDefault.Foreground(e.theme.quote)
+		if e.focusMode && !current {
+			style = style.Foreground(e.theme.muted)
+		}
 		if e.positionSelected(0, vr.y) {
 			style = style.Background(tcell.ColorDodgerBlue).Foreground(tcell.ColorWhite).Bold(true)
 		}
@@ -2106,7 +2124,7 @@ func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width
 	}
 	style := tcell.StyleDefault.Foreground(e.theme.text).Background(e.theme.background)
 	if e.focusMode && !current {
-		style = style.Dim(true)
+		style = style.Foreground(e.theme.muted)
 	}
 	e.putSelected(left, row, vr.text, style, width, vr.y, vr.start)
 }
@@ -2134,6 +2152,9 @@ func (e *editor) zopaFenceBounds(y int) (int, int, bool) {
 func (e *editor) drawLine(left, row, y int, line string, current bool, width int) {
 	if isRule(line) && !current {
 		style := tcell.StyleDefault.Foreground(e.theme.quote)
+		if e.focusMode && !current {
+			style = style.Foreground(e.theme.muted)
+		}
 		ruleText := renderRule(width)
 		padding := (width - len([]rune(ruleText))) / 2
 		if padding < 0 {
@@ -2144,17 +2165,25 @@ func (e *editor) drawLine(left, row, y int, line string, current bool, width int
 	}
 	style := tcell.StyleDefault.Foreground(e.theme.text).Background(e.theme.background)
 	if e.focusMode && !current {
-		style = style.Dim(true)
+		style = style.Foreground(e.theme.muted)
 	}
 	trimmed := strings.TrimSpace(line)
 	if e.inTable(y) && !e.cursorInSameTable(y) {
-		e.drawTableLine(left, row, y, width, style.Foreground(e.theme.table))
+		tableStyle := style
+		if !(e.focusMode && !current) {
+			tableStyle = tableStyle.Foreground(e.theme.table)
+		}
+		e.drawTableLine(left, row, y, width, tableStyle)
 		return
 	}
 	if y != e.y {
 		if quote, ok := blockQuote(line); ok {
 			line = "│ " + quote
-			style = style.Foreground(e.theme.quote)
+			if e.focusMode && !current {
+				style = style.Foreground(e.theme.muted)
+			} else {
+				style = style.Foreground(e.theme.quote)
+			}
 			trimmed = strings.TrimSpace(line)
 		}
 	}
@@ -2163,16 +2192,18 @@ func (e *editor) drawLine(left, row, y int, line string, current bool, width int
 		if progressText, hasChecklist := e.sectionChecklistProgress(y, level); hasChecklist {
 			line = line + "  " + progressText
 		}
-		switch level {
-		case 1:
-			style = style.Bold(true).Underline(true).Foreground(e.theme.heading1)
-		case 2:
-			style = style.Bold(true).Foreground(e.theme.heading2)
-		default:
-			style = style.Bold(true).Foreground(e.theme.heading3)
+		if !e.focusMode {
+			switch level {
+			case 1:
+				style = style.Bold(true).Underline(true).Foreground(e.theme.heading1)
+			case 2:
+				style = style.Bold(true).Foreground(e.theme.heading2)
+			default:
+				style = style.Bold(true).Foreground(e.theme.heading3)
+			}
 		}
 	}
-	if !current {
+	if !current && !e.focusMode {
 		switch {
 		case strings.HasPrefix(trimmed, ">"):
 			style = style.Foreground(e.theme.quote)
@@ -2415,6 +2446,9 @@ func (e *editor) putInline(x, screenY int, text string, base tcell.Style, maxWid
 		if runes[i] == '`' {
 			if end := closingRune(runes, i+1, '`'); end > i+1 {
 				codeStyle := s.Foreground(tcell.ColorLightGoldenrodYellow).Background(tcell.ColorDarkSlateGray)
+				if e.focusMode && y != e.y {
+					codeStyle = s
+				}
 				for idx, r := range runes[i+1 : end] {
 					if x >= maxWidth {
 						break
@@ -2440,6 +2474,9 @@ func (e *editor) putInline(x, screenY int, text string, base tcell.Style, maxWid
 					break
 				}
 				rStyle := styled(s)
+				if e.focusMode && y != e.y {
+					rStyle = s
+				}
 				rSrcX := start + i + marker + idx
 				if e.positionSelected(rSrcX, y) {
 					rStyle = rStyle.Background(tcell.ColorDodgerBlue).Foreground(tcell.ColorWhite).Bold(true)
