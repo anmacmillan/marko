@@ -12,8 +12,6 @@ There is no preview pane, no modal editing, no notes database, and no workspace 
 
 ![Rendered table sample](docs/table-sample.svg)
 
-![ZOPA chart sample](docs/zopa-sample.svg)
-
 The screenshot shows both states: a rendered table in the editor and the raw Markdown source that appears when you enter it. There is no preview pane.
 
 ## Why Marko?
@@ -53,17 +51,6 @@ Focus mode (`Ctrl-G` cycles themes, and inactive time triggers Goyo focus) doesn
 ### 🔄 Asynchronous External Syncing
 Marko works perfectly alongside external automations, scripts, or AI assistants. The editor watches the underlying file on a 500ms heartbeat. If an AI writes an update to the file in the background, Marko instantly reloads the buffer and redraws your screen, keeping your cursor and scroll viewport exactly where you left them.
 
-### 📊 ZOPA Settlement Range Charts
-Marko renders financial or negotiation ranges inline as compact range charts:
-````markdown
-```zopa
-Claimant target: 100000
-Claimant minimum: 80000
-Respondent maximum: 95000
-Respondent offer: 70000
-```
-````
-Typing `` ```zopa `` and pressing Enter inserts a complete chart template. Marko displays the visual overlap (Zone of Possible Agreement) and returns to the source variables as soon as you step inside.
 
 ## Essential Keys
 
