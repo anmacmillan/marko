@@ -42,7 +42,7 @@ Documents autosave after two idle seconds. Press `F1` inside Marko for the compl
 - **Interactive Checkboxes**: Toggle lists and markdown checkboxes `[ ]` / `[x]` instantly using `Ctrl-Space`.
 
 ### 🎯 Intelligent Focus Mode
-Focus mode (`Ctrl-G` cycles themes, and inactive time triggers Goyo focus) doesn't just dim lines blindly. It parses Markdown structure:
+Focus mode (toggled persistently using `Ctrl-K`) doesn't just dim lines blindly. It parses Markdown structure:
 - If you're on a paragraph, it highlights the paragraph and dims everything else.
 - If you enter a table, the entire table remains beautifully lit.
 - If you write code, the entire code block stays visible.
@@ -65,6 +65,7 @@ Marko works perfectly alongside external automations, scripts, or AI assistants.
 | `Ctrl-C` / `Ctrl-X` / `Ctrl-V` | Copy / cut / paste |
 | `Ctrl-T` | Create table |
 | `Ctrl-G` | Cycle theme |
+| `Ctrl-K` | Toggle focus mode (Goyo-style) |
 | `Ctrl-Q` | Quit |
 
 ## Install

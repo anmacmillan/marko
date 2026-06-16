@@ -247,7 +247,6 @@ func (e *editor) run() {
 			e.screen.Sync()
 		case *tcell.EventInterrupt:
 			e.autosave()
-			e.focusMode = time.Since(e.lastAction) >= 5*time.Second
 			if e.externalChange() {
 				if !e.dirty {
 					e.reloadFile()
@@ -257,25 +256,15 @@ func (e *editor) run() {
 				}
 			}
 		case *tcell.EventKey:
-			oldStart, oldEnd := e.paragraphBounds(e.y)
-			wasFocusMode := e.focusMode
-			e.lastAction, e.focusMode, e.manualScroll = time.Now(), false, false
+			e.lastAction, e.manualScroll = time.Now(), false
 			if e.key(ev) {
 				return
 			}
-			if wasFocusMode && e.y >= oldStart && e.y <= oldEnd {
-				e.focusMode = true
-			}
 		case *tcell.EventMouse:
-			oldStart, oldEnd := e.paragraphBounds(e.y)
-			wasFocusMode := e.focusMode
 			if ev.Buttons() != tcell.ButtonNone {
-				e.lastAction, e.focusMode = time.Now(), false
+				e.lastAction = time.Now()
 			}
 			e.mouse(ev)
-			if wasFocusMode && e.y >= oldStart && e.y <= oldEnd {
-				e.focusMode = true
-			}
 		case *tcell.EventClipboard:
 			if e.waitingForPaste {
 				e.insertText(string(ev.Data()))
@@ -552,6 +541,8 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		e.insertTable()
 	case tcell.KeyF1:
 		e.showHelp = !e.showHelp
+	case tcell.KeyCtrlK:
+		e.focusMode = !e.focusMode
 	case tcell.KeyCtrlO:
 		e.openLink()
 	case tcell.KeyCtrlSpace:
@@ -1616,7 +1607,7 @@ func (e *editor) drawHelp(w, h int) {
 		"F1 close   Ctrl-S save   Ctrl-Shift-S save as   Ctrl-Q quit",
 		"Ctrl-F find   Ctrl-N/P next/previous   Ctrl-R replace",
 		"Ctrl-Z/Y undo/redo   Ctrl-C/X/V clipboard",
-		"Ctrl-T table   Ctrl-Space checkbox   Ctrl-O open link",
+		"Ctrl-T table   Ctrl-Space checkbox   Ctrl-O link   Ctrl-K focus",
 		"Ctrl-E recent files   Ctrl-G theme   Shift-arrows or mouse drag select",
 	}
 	width := 0
