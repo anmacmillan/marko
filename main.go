@@ -468,6 +468,26 @@ func writingArea(screenWidth int) (int, int) {
 	return max(0, (screenWidth-contentWidth)/2), contentWidth
 }
 
+func eventKey(ev *tcell.EventKey) tcell.Key {
+	if ev.Key() != tcell.KeyRune {
+		return ev.Key()
+	}
+	r := ev.Rune()
+	if r >= 1 && r <= 26 {
+		return tcell.KeyCtrlA + tcell.Key(r-1)
+	}
+	if ev.Modifiers()&tcell.ModCtrl == 0 {
+		return ev.Key()
+	}
+	if r >= 'A' && r <= 'Z' {
+		return tcell.KeyCtrlA + tcell.Key(r-'A')
+	}
+	if r >= 'a' && r <= 'z' {
+		return tcell.KeyCtrlA + tcell.Key(r-'a')
+	}
+	return ev.Key()
+}
+
 func (e *editor) key(ev *tcell.EventKey) bool {
 	if e.showRecent {
 		e.recentKey(ev)
@@ -477,7 +497,7 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		e.promptKey(ev)
 		return false
 	}
-	switch ev.Key() {
+	switch eventKey(ev) {
 	case tcell.KeyCtrlQ:
 		if e.dirty && !e.confirmQuit {
 			e.status = "Unsaved changes. Press Ctrl-Q again to quit."
@@ -687,7 +707,7 @@ func (e *editor) cycleTheme() {
 }
 
 func (e *editor) promptKey(ev *tcell.EventKey) {
-	switch ev.Key() {
+	switch eventKey(ev) {
 	case tcell.KeyEsc:
 		e.prompt, e.promptValue = "", ""
 		e.status = "Cancelled"
@@ -891,12 +911,9 @@ func (e *editor) beginKeyboardSelection(mod tcell.ModMask) {
 }
 
 func (e *editor) selectionText() string {
-	if !e.selecting || (e.selX == e.x && e.selY == e.y) {
+	ax, ay, bx, by, ok := e.selectionBounds()
+	if !ok {
 		return ""
-	}
-	ax, ay, bx, by := e.selX, e.selY, e.x, e.y
-	if ay > by || (ay == by && ax > bx) {
-		ax, ay, bx, by = bx, by, ax, ay
 	}
 	if ay == by {
 		return string([]rune(e.lines[ay])[ax:bx])
@@ -960,9 +977,10 @@ func (e *editor) cutSelection() {
 }
 
 func (e *editor) deleteSelection() {
-	ax, ay, bx, by := e.selX, e.selY, e.x, e.y
-	if ay > by || (ay == by && ax > bx) {
-		ax, ay, bx, by = bx, by, ax, ay
+	ax, ay, bx, by, ok := e.selectionBounds()
+	if !ok {
+		e.selecting = false
+		return
 	}
 	left, right := []rune(e.lines[ay])[:ax], []rune(e.lines[by])[bx:]
 	e.lines[ay] = string(left) + string(right)
@@ -2033,13 +2051,13 @@ func (e *editor) putCodeLine(left, row int, vr visualRow, style tcell.Style, max
 				srcX = 0
 			}
 			if e.positionSelected(srcX, vr.y) {
-				s = s.Background(tcell.ColorDodgerBlue).Foreground(tcell.ColorWhite).Bold(true)
+				s = selectedStyle(s)
 			} else if e.positionMatchesSearch(srcX, vr.y) {
 				s = s.Background(tcell.ColorDarkGoldenrod).Foreground(tcell.ColorWhite)
 			}
 		} else {
 			if e.positionSelected(0, vr.y) {
-				s = s.Background(tcell.ColorDodgerBlue).Foreground(tcell.ColorWhite).Bold(true)
+				s = selectedStyle(s)
 			}
 		}
 		e.screen.SetContent(left+i, row, runes[i], nil, s)
@@ -2058,7 +2076,7 @@ func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width
 	if start, end, ok := e.zopaFenceBounds(vr.y); ok && (e.y < start || e.y > end) {
 		style := tcell.StyleDefault.Background(e.theme.background)
 		if e.positionSelected(0, vr.y) {
-			style = style.Background(tcell.ColorDodgerBlue).Foreground(tcell.ColorWhite).Bold(true)
+			style = selectedStyle(style)
 		} else {
 			if e.focusMode && !current {
 				style = style.Foreground(e.theme.muted)
@@ -2083,7 +2101,7 @@ func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width
 	if start, end, ok := e.barChartFenceBounds(vr.y); ok && (e.y < start || e.y > end) {
 		style := tcell.StyleDefault.Background(e.theme.background)
 		if e.positionSelected(0, vr.y) {
-			style = style.Background(tcell.ColorDodgerBlue).Foreground(tcell.ColorWhite).Bold(true)
+			style = selectedStyle(style)
 		} else {
 			if e.focusMode && !current {
 				style = style.Foreground(e.theme.muted)
@@ -2104,7 +2122,7 @@ func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width
 			style = style.Foreground(e.theme.muted)
 		}
 		if e.positionSelected(0, vr.y) {
-			style = style.Background(tcell.ColorDodgerBlue).Foreground(tcell.ColorWhite).Bold(true)
+			style = selectedStyle(style)
 		}
 		ruleText := renderRule(width)
 		padding := (width - len([]rune(ruleText))) / 2
@@ -2167,6 +2185,10 @@ func (e *editor) drawLine(left, row, y int, line string, current bool, width int
 	if e.focusMode && !current {
 		style = style.Foreground(e.theme.muted)
 	}
+	if line == "" && e.positionSelected(0, y) {
+		e.put(left, row, strings.Repeat(" ", width), selectedStyle(style), left+width)
+		return
+	}
 	trimmed := strings.TrimSpace(line)
 	if e.inTable(y) && !e.cursorInSameTable(y) {
 		tableStyle := style
@@ -2227,12 +2249,16 @@ func (e *editor) putSelected(left, row int, text string, style tcell.Style, widt
 		}
 		s := style
 		if e.positionSelected(start+x, y) {
-			s = s.Background(tcell.ColorDodgerBlue).Foreground(tcell.ColorWhite).Bold(true)
+			s = selectedStyle(s)
 		} else if e.positionMatchesSearch(start+x, y) {
 			s = s.Background(tcell.ColorDarkGoldenrod).Foreground(tcell.ColorWhite)
 		}
 		e.screen.SetContent(left+x, row, r, nil, s)
 	}
+}
+
+func selectedStyle(style tcell.Style) tcell.Style {
+	return style.Background(tcell.ColorDodgerBlue).Foreground(tcell.ColorWhite).Bold(true)
 }
 
 func (e *editor) positionMatchesSearch(x, y int) bool {
@@ -2249,13 +2275,28 @@ func (e *editor) positionMatchesSearch(x, y int) bool {
 	return false
 }
 
-func (e *editor) positionSelected(x, y int) bool {
-	if !e.selecting {
-		return false
+func (e *editor) selectionBounds() (int, int, int, int, bool) {
+	if !e.selecting || len(e.lines) == 0 {
+		return 0, 0, 0, 0, false
 	}
 	ax, ay, bx, by := e.selX, e.selY, e.x, e.y
+	ay = max(0, min(len(e.lines)-1, ay))
+	by = max(0, min(len(e.lines)-1, by))
+	ax = max(0, min(runeLen(e.lines[ay]), ax))
+	bx = max(0, min(runeLen(e.lines[by]), bx))
 	if ay > by || (ay == by && ax > bx) {
 		ax, ay, bx, by = bx, by, ax, ay
+	}
+	if ay == by && ax == bx {
+		return ax, ay, bx, by, false
+	}
+	return ax, ay, bx, by, true
+}
+
+func (e *editor) positionSelected(x, y int) bool {
+	ax, ay, bx, by, ok := e.selectionBounds()
+	if !ok {
+		return false
 	}
 	return (y > ay || (y == ay && x >= ax)) && (y < by || (y == by && x < bx))
 }
@@ -2438,7 +2479,7 @@ func (e *editor) putInline(x, screenY int, text string, base tcell.Style, maxWid
 		s := base
 		srcX := start + i
 		if e.positionSelected(srcX, y) {
-			s = s.Background(tcell.ColorDodgerBlue).Foreground(tcell.ColorWhite).Bold(true)
+			s = selectedStyle(s)
 		} else if e.positionMatchesSearch(srcX, y) {
 			s = s.Background(tcell.ColorDarkGoldenrod).Foreground(tcell.ColorWhite)
 		}
@@ -2456,7 +2497,7 @@ func (e *editor) putInline(x, screenY int, text string, base tcell.Style, maxWid
 					rStyle := codeStyle
 					rSrcX := start + i + 1 + idx
 					if e.positionSelected(rSrcX, y) {
-						rStyle = rStyle.Background(tcell.ColorDodgerBlue).Foreground(tcell.ColorWhite).Bold(true)
+						rStyle = selectedStyle(rStyle)
 					} else if e.positionMatchesSearch(rSrcX, y) {
 						rStyle = rStyle.Background(tcell.ColorDarkGoldenrod).Foreground(tcell.ColorWhite)
 					}
@@ -2479,7 +2520,7 @@ func (e *editor) putInline(x, screenY int, text string, base tcell.Style, maxWid
 				}
 				rSrcX := start + i + marker + idx
 				if e.positionSelected(rSrcX, y) {
-					rStyle = rStyle.Background(tcell.ColorDodgerBlue).Foreground(tcell.ColorWhite).Bold(true)
+					rStyle = selectedStyle(rStyle)
 				} else if e.positionMatchesSearch(rSrcX, y) {
 					rStyle = rStyle.Background(tcell.ColorDarkGoldenrod).Foreground(tcell.ColorWhite)
 				}
