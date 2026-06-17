@@ -15,35 +15,35 @@ import (
 )
 
 type editor struct {
-	screen       tcell.Screen
-	path         string
-	lines        []string
-	x, y, top    int
-	dirty        bool
-	status       string
-	confirmQuit  bool
-	preferredX   int
-	prompt       string
-	promptValue  string
-	lastEdit     time.Time
-	recovery     string
-	theme        theme
-	themeName    string
-	undo, redo   []snapshot
-	selecting    bool
-	selX, selY   int
-	mouseDown    bool
-	lastClick    time.Time
-	clickX       int
-	clickY       int
-	clickCount   int
-	search       string
-	replace      string
-	lastAction   time.Time
-	focusMode    bool
-	manualScroll bool
-	modTime      time.Time
-	conflict     bool
+	screen          tcell.Screen
+	path            string
+	lines           []string
+	x, y, top       int
+	dirty           bool
+	status          string
+	confirmQuit     bool
+	preferredX      int
+	prompt          string
+	promptValue     string
+	lastEdit        time.Time
+	recovery        string
+	theme           theme
+	themeName       string
+	undo, redo      []snapshot
+	selecting       bool
+	selX, selY      int
+	mouseDown       bool
+	lastClick       time.Time
+	clickX          int
+	clickY          int
+	clickCount      int
+	search          string
+	replace         string
+	lastAction      time.Time
+	focusMode       bool
+	manualScroll    bool
+	modTime         time.Time
+	conflict        bool
 	showHelp        bool
 	showRecent      bool
 	recent          []string
@@ -488,6 +488,10 @@ func eventKey(ev *tcell.EventKey) tcell.Key {
 	return ev.Key()
 }
 
+func textInputModifiers(mod tcell.ModMask) bool {
+	return mod&(tcell.ModCtrl|tcell.ModAlt|tcell.ModMeta|tcell.ModHyper) == 0
+}
+
 func (e *editor) key(ev *tcell.EventKey) bool {
 	if e.showRecent {
 		e.recentKey(ev)
@@ -624,6 +628,10 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 			e.insert("    ")
 		}
 	case tcell.KeyRune:
+		if !textInputModifiers(ev.Modifiers()) {
+			e.status = "Ignored modified key"
+			break
+		}
 		e.checkpoint()
 		if e.selecting {
 			e.deleteSelection()
@@ -1583,31 +1591,31 @@ func (e *editor) paragraphBounds(y int) (int, int) {
 
 	start, end := y, y
 	for start > 0 && !isParagraphBoundary(e.lines[start-1]) {
-		if _, _, ok := e.codeFenceBounds(start-1); ok {
+		if _, _, ok := e.codeFenceBounds(start - 1); ok {
 			break
 		}
-		if e.inTable(start-1) {
+		if e.inTable(start - 1) {
 			break
 		}
-		if _, _, ok := e.zopaFenceBounds(start-1); ok {
+		if _, _, ok := e.zopaFenceBounds(start - 1); ok {
 			break
 		}
-		if _, _, ok := e.barChartFenceBounds(start-1); ok {
+		if _, _, ok := e.barChartFenceBounds(start - 1); ok {
 			break
 		}
 		start--
 	}
 	for end+1 < len(e.lines) && !isParagraphBoundary(e.lines[end+1]) {
-		if _, _, ok := e.codeFenceBounds(end+1); ok {
+		if _, _, ok := e.codeFenceBounds(end + 1); ok {
 			break
 		}
-		if e.inTable(end+1) {
+		if e.inTable(end + 1) {
 			break
 		}
-		if _, _, ok := e.zopaFenceBounds(end+1); ok {
+		if _, _, ok := e.zopaFenceBounds(end + 1); ok {
 			break
 		}
-		if _, _, ok := e.barChartFenceBounds(end+1); ok {
+		if _, _, ok := e.barChartFenceBounds(end + 1); ok {
 			break
 		}
 		end++
@@ -2209,7 +2217,7 @@ func (e *editor) drawLine(left, row, y int, line string, current bool, width int
 			trimmed = strings.TrimSpace(line)
 		}
 	}
-	if level, text, ok := heading(line); ok && !current {
+	if level, text, ok := heading(line); ok {
 		line = text
 		if progressText, hasChecklist := e.sectionChecklistProgress(y, level); hasChecklist {
 			line = line + "  " + progressText
@@ -2235,11 +2243,7 @@ func (e *editor) drawLine(left, row, y int, line string, current bool, width int
 			style = style.Foreground(e.theme.table)
 		}
 	}
-	if current {
-		e.putSelected(left, row, line, style, width, y, 0)
-	} else {
-		e.putInline(left, row, line, style, left+width, y, 0)
-	}
+	e.putInline(left, row, line, style, left+width, y, 0)
 }
 
 func (e *editor) putSelected(left, row int, text string, style tcell.Style, width, y, start int) {

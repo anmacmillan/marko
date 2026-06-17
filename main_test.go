@@ -637,6 +637,81 @@ func TestInlineCodeRendering(t *testing.T) {
 	}
 }
 
+func TestCurrentLineRendersInlineMarkdown(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(90, 3)
+	e := &editor{
+		screen: screen,
+		lines:  []string{`**His case:** That possibility defeats the *Dobie* test.`},
+		theme:  themeByName("calm"),
+	}
+	e.drawLine(0, 0, 0, e.lines[0], true, 90)
+	got := strings.TrimRight(simulationLine(screen, 0, 90), " ")
+	want := "His case: That possibility defeats the Dobie test."
+	if got != want {
+		t.Fatalf("current inline markdown render = %q, want %q", got, want)
+	}
+	if strings.ContainsAny(got, "*_") {
+		t.Fatalf("current inline markdown exposed marker: %q", got)
+	}
+	mainc, _, style, _ := screen.GetContent(0, 0)
+	if mainc != 'H' {
+		t.Fatalf("first rendered character = %q, want H", mainc)
+	}
+	_, _, attrs := style.Decompose()
+	if attrs&tcell.AttrBold == 0 {
+		t.Fatal("current bold marker did not apply bold style")
+	}
+}
+
+func TestCurrentHeadingHidesMarker(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(90, 3)
+	e := &editor{
+		screen: screen,
+		lines:  []string{`### 4. "Even if misdirection, the outcome would be the same."`},
+		theme:  themeByName("calm"),
+	}
+	e.drawLine(0, 0, 0, e.lines[0], true, 90)
+	got := strings.TrimRight(simulationLine(screen, 0, 90), " ")
+	want := `4. "Even if misdirection, the outcome would be the same."`
+	if got != want {
+		t.Fatalf("current heading render = %q, want %q", got, want)
+	}
+}
+
+func TestModifiedRuneDoesNotReplaceSelection(t *testing.T) {
+	for _, mod := range []tcell.ModMask{tcell.ModAlt, tcell.ModMeta, tcell.ModHyper} {
+		e := &editor{
+			lines:     []string{"alpha", "bravo"},
+			selX:      0,
+			selY:      0,
+			x:         5,
+			y:         1,
+			selecting: true,
+		}
+		before := append([]string(nil), e.lines...)
+		e.key(tcell.NewEventKey(tcell.KeyRune, 'c', mod))
+		if !reflect.DeepEqual(e.lines, before) {
+			t.Fatalf("modified rune with mod %v mutated lines: %#v, want %#v", mod, e.lines, before)
+		}
+		if !e.selecting {
+			t.Fatalf("modified rune with mod %v cleared selection", mod)
+		}
+		if len(e.undo) != 0 {
+			t.Fatalf("modified rune with mod %v created undo checkpoint", mod)
+		}
+	}
+}
+
 func TestClosingRune(t *testing.T) {
 	if got, want := closingRune([]rune("`code`"), 1, '`'), 5; got != want {
 		t.Fatalf("closingRune() = %d, want %d", got, want)
