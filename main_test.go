@@ -804,6 +804,102 @@ func TestSelectionText(t *testing.T) {
 	}
 }
 
+func TestSelectionTextAcrossParagraphs(t *testing.T) {
+	e := &editor{
+		lines:     []string{"one", "", "two", "", "three"},
+		selX:      0,
+		selY:      0,
+		x:         5,
+		y:         4,
+		selecting: true,
+	}
+	if got, want := e.selectionText(), "one\n\ntwo\n\nthree"; got != want {
+		t.Fatalf("multi-paragraph selectionText() = %q, want %q", got, want)
+	}
+}
+
+func TestSelectionBoundsClampBeforeSlicing(t *testing.T) {
+	e := &editor{lines: []string{"short", "end"}, selX: 50, selY: 0, x: 20, y: 1, selecting: true}
+	if got, want := e.selectionText(), "\nend"; got != want {
+		t.Fatalf("clamped selectionText() = %q, want %q", got, want)
+	}
+	e.deleteSelection()
+	if got, want := e.lines, []string{"short"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("clamped deleteSelection() = %#v, want %#v", got, want)
+	}
+}
+
+func TestCtrlCCopyDoesNotMutateSelection(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	e := &editor{
+		screen:    screen,
+		lines:     []string{"alpha", "", "bravo"},
+		selX:      0,
+		selY:      0,
+		x:         5,
+		y:         2,
+		selecting: true,
+	}
+	before := append([]string(nil), e.lines...)
+	e.key(tcell.NewEventKey(tcell.KeyCtrlC, 0, tcell.ModCtrl))
+	if !reflect.DeepEqual(e.lines, before) {
+		t.Fatalf("Ctrl-C mutated lines: %#v, want %#v", e.lines, before)
+	}
+	if !e.selecting {
+		t.Fatal("Ctrl-C cleared selection")
+	}
+}
+
+func TestSelectedBlankLineIsHighlighted(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(20, 3)
+	e := &editor{
+		screen:    screen,
+		lines:     []string{"one", "", "two"},
+		x:         3,
+		y:         2,
+		selX:      0,
+		selY:      0,
+		selecting: true,
+		theme:     themeByName("calm"),
+	}
+	e.drawLine(0, 0, 1, e.lines[1], false, 20)
+	_, _, style, _ := screen.GetContent(0, 0)
+	_, bg, _ := style.Decompose()
+	if bg != tcell.ColorDodgerBlue {
+		t.Fatalf("selected blank line background = %v, want %v", bg, tcell.ColorDodgerBlue)
+	}
+}
+
+func TestMouseDragSelectsAcrossParagraphs(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(80, 10)
+	e := &editor{
+		screen: screen,
+		lines:  []string{"one", "", "two", "", "three"},
+		theme:  themeByName("calm"),
+	}
+	left, _ := writingArea(80)
+	e.mouse(tcell.NewEventMouse(left, 0, tcell.Button1, tcell.ModNone))
+	e.mouse(tcell.NewEventMouse(left+5, 4, tcell.Button1, tcell.ModNone))
+	e.mouse(tcell.NewEventMouse(left+5, 4, tcell.ButtonNone, tcell.ModNone))
+	if got, want := e.selectionText(), "one\n\ntwo\n\nthree"; got != want {
+		t.Fatalf("mouse multi-paragraph selection = %q, want %q", got, want)
+	}
+}
+
 func TestFindPrevious(t *testing.T) {
 	e := &editor{lines: []string{"one two one"}, search: "one", x: 11}
 	e.findPrevious()
