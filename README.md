@@ -86,6 +86,16 @@ Or build from source:
 go install github.com/alexandermacmillan/little-marco@latest
 ```
 
+After cloning the repo, `make install` builds a stripped binary and installs it
+to `~/.local/bin/marko`:
+
+```sh
+git clone https://github.com/anmacmillan/marko.git
+cd marko
+make install      # builds and installs ~/.local/bin/marko
+make test         # optional: run the test suite
+```
+
 ## Themes And Fonts
 
 ```sh
