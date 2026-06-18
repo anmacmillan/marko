@@ -50,6 +50,7 @@ type editor struct {
 	recentIndex     int
 	renameFrom      string
 	waitingForPaste bool
+	untitled        bool
 }
 
 type snapshot struct {
@@ -80,12 +81,14 @@ func main() {
 		os.Exit(2)
 	}
 	path := ""
+	untitled := false
 	if len(os.Args) == 2 {
 		path = os.Args[1]
 	} else {
 		path = uniqueUntitledPath(time.Now(), ".")
+		untitled = true
 	}
-	e, err := newEditor(path)
+	e, err := newEditor(path, untitled)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -94,7 +97,7 @@ func main() {
 	e.run()
 }
 
-func newEditor(path string) (*editor, error) {
+func newEditor(path string, untitled bool) (*editor, error) {
 	data := []byte{}
 	if path != "" {
 		var err error
@@ -121,9 +124,9 @@ func newEditor(path string) (*editor, error) {
 	}
 	s.EnableMouse()
 	s.EnablePaste()
-	status := "Ctrl-T new table  Ctrl-S save  Ctrl-Q quit"
+	status := "Ctrl-B bold · Ctrl-E italic · Ctrl-U underline · Ctrl-S save · Ctrl-Q quit"
 	themeName := selectedThemeName()
-	e := &editor{screen: s, path: path, lines: lines, status: status, themeName: themeName, theme: themeByName(themeName), lastAction: time.Now(), modTime: modTime}
+	e := &editor{screen: s, path: path, untitled: untitled, lines: lines, status: status, themeName: themeName, theme: themeByName(themeName), lastAction: time.Now(), modTime: modTime}
 	e.rememberRecent(path)
 	return e, nil
 }
@@ -510,12 +513,13 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		}
 		return true
 	case tcell.KeyCtrlS:
-		if ev.Modifiers()&tcell.ModShift != 0 {
+		if ev.Modifiers()&tcell.ModShift != 0 || e.untitled || e.path == "" {
 			e.prompt = "Save as: "
-			e.promptValue = e.path
-		} else if e.path == "" {
-			e.prompt = "Save as: "
-			e.promptValue = "untitled.md"
+			if e.untitled || e.path == "" {
+				e.promptValue = "untitled.md"
+			} else {
+				e.promptValue = e.path
+			}
 		} else {
 			e.save()
 		}
@@ -527,9 +531,25 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		e.checkpoint()
 		e.deleteLine()
 	case tcell.KeyCtrlE:
-		e.recent = loadRecent()
-		e.recentIndex = 0
-		e.showRecent = true
+		if ev.Modifiers()&tcell.ModShift != 0 {
+			e.recent = loadRecent()
+			e.recentIndex = 0
+			e.showRecent = true
+		} else {
+			e.checkpoint()
+			e.toggleEmphasis("*", "*")
+		}
+	case tcell.KeyCtrlB:
+		e.checkpoint()
+		e.toggleEmphasis("**", "**")
+	case tcell.KeyCtrlU:
+		e.checkpoint()
+		e.toggleEmphasis("<u>", "</u>")
+	case tcell.KeyCtrlH:
+		e.checkpoint()
+		e.toggleEmphasis("==", "==")
+	case tcell.KeyCtrlA:
+		e.selectAll()
 	case tcell.KeyCtrlZ:
 		e.undoEdit()
 	case tcell.KeyCtrlY:
@@ -683,6 +703,7 @@ func (e *editor) openFile(path string) {
 		return
 	}
 	e.path = path
+	e.untitled = false
 	e.lines = strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
 	if len(e.lines) == 0 {
 		e.lines = []string{""}
@@ -746,6 +767,7 @@ func (e *editor) promptKey(ev *tcell.EventKey) {
 			path += ".md"
 		}
 		e.path = path
+		e.untitled = false
 		e.conflict = false
 		e.modTime = time.Time{}
 		e.prompt, e.promptValue = "", ""
@@ -1215,6 +1237,127 @@ func (e *editor) openLink() {
 	e.status = "Opened " + url
 }
 
+// toggleEmphasis wraps or unwraps the current selection in the given Markdown
+// markers (e.g. "**"/"**" for bold, "<u>"/"</u>" for underline). With no
+// selection it inserts an empty marker pair and leaves the cursor between them.
+func (e *editor) toggleEmphasis(open, close string) {
+	if !e.selecting {
+		e.insertEmptyMarkers(open, close)
+		e.status = "Insert " + emphasisLabel(open, close)
+		return
+	}
+	ax, ay, bx, by, ok := e.selectionBounds()
+	if !ok {
+		e.insertEmptyMarkers(open, close)
+		e.status = "Insert " + emphasisLabel(open, close)
+		return
+	}
+	if ay == by {
+		e.toggleEmphasisSingleLine(ay, ax, bx, open, close)
+		return
+	}
+	// Multi-line selection: wrap each touched line's selected span.
+	e.checkpoint()
+	for y := ay; y <= by; y++ {
+		runes := []rune(e.lines[y])
+		startX, endX := 0, len(runes)
+		if y == ay {
+			startX = ax
+		}
+		if y == by {
+			endX = bx
+		}
+		if startX == endX {
+			continue
+		}
+		e.lines[y] = string(runes[:startX]) + open + string(runes[startX:endX]) + close + string(runes[endX:])
+	}
+	e.dirty = true
+	// Keep the selection covering the same logical span.
+	e.selX, e.selY = ax, ay
+	if ay == by {
+		e.x = bx + runeLen(open) + runeLen(close)
+	} else {
+		e.x = bx + runeLen(close)
+	}
+	e.y = by
+	e.selecting = true
+	e.status = "Applied " + emphasisLabel(open, close)
+}
+
+// toggleEmphasisSingleLine wraps or unwraps [ax, bx) on a single line.
+func (e *editor) toggleEmphasisSingleLine(y, ax, bx int, open, close string) {
+	runes := []rune(e.lines[y])
+	openRunes := []rune(open)
+	closeRunes := []rune(close)
+	// Unwrap if the selection is already bracketed by these markers.
+	if ax >= len(openRunes) && bx+len(closeRunes) <= len(runes) &&
+		runesEqualAt(runes, ax-len(openRunes), openRunes) &&
+		runesEqualAt(runes, bx, closeRunes) {
+		e.checkpoint()
+		newRunes := append(append([]rune{}, runes[:ax-len(openRunes)]...), runes[ax:bx]...)
+		newRunes = append(newRunes, runes[bx+len(closeRunes):]...)
+		e.lines[y] = string(newRunes)
+		e.dirty = true
+		e.selX, e.selY = ax - len(openRunes), y
+		e.x, e.y = bx-len(openRunes), y
+		e.selecting = true
+		e.status = "Removed " + emphasisLabel(open, close)
+		return
+	}
+	// Otherwise wrap the selection.
+	e.checkpoint()
+	newRunes := append([]rune{}, runes[:ax]...)
+	newRunes = append(newRunes, openRunes...)
+	newRunes = append(newRunes, runes[ax:bx]...)
+	newRunes = append(newRunes, closeRunes...)
+	newRunes = append(newRunes, runes[bx:]...)
+	e.lines[y] = string(newRunes)
+	e.dirty = true
+	e.selX, e.selY = ax+len(openRunes), y
+	e.x, e.y = bx+len(openRunes), y
+	e.selecting = true
+	e.status = "Applied " + emphasisLabel(open, close)
+}
+
+// insertEmptyMarkers inserts an open/close pair and places the cursor between
+// them so subsequent typing is formatted.
+func (e *editor) insertEmptyMarkers(open, close string) {
+	e.checkpoint()
+	r := []rune(e.lines[e.y])
+	before, after := string(r[:e.x]), string(r[e.x:])
+	e.lines[e.y] = before + open + close + string(after)
+	e.x += runeLen(open)
+	e.dirty = true
+}
+
+func emphasisLabel(open, close string) string {
+	switch open {
+	case "**", "__":
+		return "bold"
+	case "*", "_":
+		return "italic"
+	case "==":
+		return "highlight"
+	case "<u>":
+		return "underline"
+	default:
+		return open + close
+	}
+}
+
+// selectAll selects the entire document.
+func (e *editor) selectAll() {
+	if len(e.lines) == 0 {
+		return
+	}
+	e.selX, e.selY = 0, 0
+	e.y = len(e.lines) - 1
+	e.x = runeLen(e.lines[e.y])
+	e.selecting = true
+	e.status = "Selected all"
+}
+
 func (e *editor) nextTableCell() bool {
 	if e.nextChartValue() {
 		return true
@@ -1428,7 +1571,7 @@ func (e *editor) renameFile(path string) {
 		e.status = "Rename failed: " + err.Error()
 		return
 	}
-	e.path, e.renameFrom = path, ""
+	e.path, e.renameFrom, e.untitled = path, "", false
 	if info, err := os.Stat(e.path); err == nil {
 		e.modTime = info.ModTime()
 	}
@@ -1635,10 +1778,11 @@ func (e *editor) drawHelp(w, h int) {
 	lines := []string{
 		" Marko help ",
 		"F1 close   Ctrl-S save   Ctrl-Shift-S save as   Ctrl-Q quit",
+		"Ctrl-B bold   Ctrl-E italic   Ctrl-U underline   Ctrl-H highlight",
+		"Ctrl-A select all   Ctrl-Space checkbox   Ctrl-O link   Ctrl-T table",
 		"Ctrl-F find   Ctrl-N/P next/previous   Ctrl-R replace",
-		"Ctrl-Z/Y undo/redo   Ctrl-C/X/V clipboard",
-		"Ctrl-T table   Ctrl-Space checkbox   Ctrl-O link   Ctrl-K focus",
-		"Ctrl-E recent files   Ctrl-G theme   Shift-arrows or mouse drag select",
+		"Ctrl-Z/Y undo/redo   Ctrl-C/X/V clipboard   Ctrl-K focus",
+		"Ctrl-Shift-E recent files   Ctrl-G theme   Shift-arrows or drag select",
 	}
 	width := 0
 	for _, line := range lines {
@@ -2152,7 +2296,18 @@ func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width
 	if e.focusMode && !current {
 		style = style.Foreground(e.theme.muted)
 	}
-	e.putSelected(left, row, vr.text, style, width, vr.y, vr.start)
+	// Reconstruct the rendered line exactly as visualRows wrapped it, so that
+	// vr.start aligns with the rune offsets emphasis markers use. For
+	// non-current block quotes visualRows prepends "│ " to the quote body.
+	line := e.lines[vr.y]
+	if vr.y != e.y {
+		if quote, ok := blockQuote(line); ok {
+			line = "│ " + quote
+		}
+	}
+	visStart := vr.start
+	visEnd := vr.start + runeLen(vr.text)
+	e.putInlineWindow(left, row, line, style, left+width, vr.y, visStart, visEnd)
 }
 
 func (e *editor) codeFenceBounds(y int) (int, int, bool) {
@@ -2455,10 +2610,10 @@ func inlinePlainText(value string) string {
 	runes := []rune(value)
 	var plain []rune
 	for i := 0; i < len(runes); {
-		marker, _, end := emphasisAt(runes, i)
-		if marker > 0 {
-			plain = append(plain, runes[i+marker:end]...)
-			i = end + marker
+		openLen, closeLen, _, end := emphasisAt(runes, i)
+		if openLen > 0 {
+			plain = append(plain, runes[i+openLen:end]...)
+			i = end + closeLen
 			continue
 		}
 		plain = append(plain, runes[i])
@@ -2512,7 +2667,7 @@ func (e *editor) putInline(x, screenY int, text string, base tcell.Style, maxWid
 				continue
 			}
 		}
-		marker, styled, end := emphasisAt(runes, i)
+		marker, closeLen, styled, end := emphasisAt(runes, i)
 		if marker > 0 {
 			for idx, r := range runes[i+marker : end] {
 				if x >= maxWidth {
@@ -2531,11 +2686,81 @@ func (e *editor) putInline(x, screenY int, text string, base tcell.Style, maxWid
 				e.screen.SetContent(x, screenY, r, nil, rStyle)
 				x++
 			}
-			i = end + marker
+			i = end + closeLen
 			continue
 		}
 		e.screen.SetContent(x, screenY, runes[i], nil, s)
 		x++
+		i++
+	}
+}
+
+// putInlineWindow renders a visible window [visStart, visEnd) of the full line
+// while searching for emphasis markers across the entire line. This lets
+// emphasis that straddles a soft-wrap boundary still render on every wrapped
+// row instead of leaking its markers as literal text.
+func (e *editor) putInlineWindow(x, screenY int, line string, base tcell.Style, maxWidth, y, visStart, visEnd int) {
+	runes := []rune(line)
+	if visStart < 0 {
+		visStart = 0
+	}
+	if visEnd > len(runes) {
+		visEnd = len(runes)
+	}
+	for i := 0; i < len(runes) && x < maxWidth; {
+		// Skip ahead to the visible window.
+		if i >= visEnd {
+			break
+		}
+
+		// Inline code span.
+		if runes[i] == '`' {
+			if end := closingRune(runes, i+1, '`'); end > i+1 {
+				i = end + 1
+				continue
+			}
+		}
+		openLen, closeLen, styled, end := emphasisAt(runes, i)
+		if openLen > 0 {
+			innerStart := i + openLen
+			innerEnd := end
+			if innerEnd > visEnd {
+				innerEnd = visEnd
+			}
+			if innerStart < visStart {
+				innerStart = visStart
+			}
+			for idx := innerStart; idx < innerEnd; idx++ {
+				if x >= maxWidth {
+					break
+				}
+				s := base
+				rStyle := styled(s)
+				if e.focusMode && y != e.y {
+					rStyle = s
+				}
+				if e.positionSelected(idx, y) {
+					rStyle = selectedStyle(rStyle)
+				} else if e.positionMatchesSearch(idx, y) {
+					rStyle = rStyle.Background(tcell.ColorDarkGoldenrod).Foreground(tcell.ColorWhite)
+				}
+				e.screen.SetContent(x, screenY, runes[idx], nil, rStyle)
+				x++
+			}
+			i = end + closeLen
+			continue
+		}
+		// Plain rune inside the visible window only.
+		if i >= visStart {
+			s := base
+			if e.positionSelected(i, y) {
+				s = selectedStyle(s)
+			} else if e.positionMatchesSearch(i, y) {
+				s = s.Background(tcell.ColorDarkGoldenrod).Foreground(tcell.ColorWhite)
+			}
+			e.screen.SetContent(x, screenY, runes[i], nil, s)
+			x++
+		}
 		i++
 	}
 }
@@ -2549,7 +2774,7 @@ func closingRune(runes []rune, start int, target rune) int {
 	return -1
 }
 
-func emphasisAt(runes []rune, start int) (int, func(tcell.Style) tcell.Style, int) {
+func emphasisAt(runes []rune, start int) (int, int, func(tcell.Style) tcell.Style, int) {
 	type markerStyle struct {
 		marker string
 		style  func(tcell.Style) tcell.Style
@@ -2558,6 +2783,7 @@ func emphasisAt(runes []rune, start int) (int, func(tcell.Style) tcell.Style, in
 		{"**", func(s tcell.Style) tcell.Style { return s.Bold(true) }},
 		{"__", func(s tcell.Style) tcell.Style { return s.Bold(true) }},
 		{"~~", func(s tcell.Style) tcell.Style { return s.StrikeThrough(true) }},
+		{"==", func(s tcell.Style) tcell.Style { return s.Background(tcell.ColorGoldenrod).Foreground(tcell.ColorBlack) }},
 		{"*", func(s tcell.Style) tcell.Style { return s.Italic(true) }},
 		{"_", func(s tcell.Style) tcell.Style { return s.Italic(true) }},
 	}
@@ -2568,11 +2794,32 @@ func emphasisAt(runes []rune, start int) (int, func(tcell.Style) tcell.Style, in
 		}
 		for end := start + len(marker) + 1; end+len(marker) <= len(runes); end++ {
 			if runesEqualAt(runes, end, marker) {
-				return len(marker), candidate.style, end
+				return len(marker), len(marker), candidate.style, end
 			}
 		}
 	}
-	return 0, nil, 0
+	// Asymmetric HTML markers, e.g. <u>…</u>. The open and close tags may
+	// differ in length, so they are matched as a distinct prefix/suffix pair.
+	type htmlMarker struct {
+		open, close string
+		style       func(tcell.Style) tcell.Style
+	}
+	htmlMarkers := []htmlMarker{
+		{"<u>", "</u>", func(s tcell.Style) tcell.Style { return s.Underline(true) }},
+	}
+	for _, candidate := range htmlMarkers {
+		open := []rune(candidate.open)
+		close := []rune(candidate.close)
+		if !runesEqualAt(runes, start, open) {
+			continue
+		}
+		for end := start + len(open); end+len(close) <= len(runes); end++ {
+			if runesEqualAt(runes, end, close) {
+				return len(open), len(close), candidate.style, end
+			}
+		}
+	}
+	return 0, 0, nil, 0
 }
 
 func runesEqualAt(haystack []rune, start int, needle []rune) bool {

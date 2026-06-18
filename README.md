@@ -38,7 +38,7 @@ Documents autosave after two idle seconds. Press `F1` inside Marko for the compl
 ### 💡 Dynamic Inline Markdown Rendering
 - **Aligned Tables**: Markdown tables instantly format into clean, boxed unicode tables. Pressing `Tab` moves through cells, `Enter` inserts new rows, and stepping out preserves the formatting.
 - **Fenced Code Blocks**: Raw code blocks fold into visually distinct boxes with calm language labels. Stepping inside reveals the code, and stepping out hides the syntax.
-- **Emphasis & Headers**: Headers are styled and clean, and bold, italic, or strikethrough markdown markers disappear inline unless you are actively editing that line.
+- **Emphasis & Headers**: Headers are styled and clean, and bold, italic, underline, highlight, or strikethrough markdown markers disappear inline unless you are actively editing that line. Toggle them WYSIWYG-style with `Ctrl-B` (bold), `Ctrl-E` (italic), `Ctrl-U` (underline), and `Ctrl-H` (highlight) — they wrap or unwrap the selection, or insert empty markers when nothing is selected.
 - **Interactive Checkboxes**: Toggle lists and markdown checkboxes `[ ]` / `[x]` instantly using `Ctrl-Space`.
 
 ### 🎯 Intelligent Focus Mode
@@ -57,8 +57,13 @@ Marko works perfectly alongside external automations, scripts, or AI assistants.
 | Key | Action |
 |---|---|
 | `F1` | Show shortcut help |
-| `Ctrl-S` / `Ctrl-Shift-S` | Save / Save As |
-| `Ctrl-E` | Open recent Markdown file |
+| `Ctrl-S` / `Ctrl-Shift-S` | Save / Save As (first save of an untitled doc always asks for a name) |
+| `Ctrl-B` | Bold (`**…**`) — wrap/unwrap selection, or insert empty markers |
+| `Ctrl-E` | Italic (`*…*`) — wrap/unwrap selection, or insert empty markers |
+| `Ctrl-U` | Underline (`<u>…</u>`) — wrap/unwrap selection, or insert empty markers |
+| `Ctrl-H` | Highlight (`==…==`, yellow) — wrap/unwrap selection, or insert empty markers |
+| `Ctrl-A` | Select all |
+| `Ctrl-Shift-E` | Open recent Markdown file |
 | `Ctrl-F` / `Ctrl-N` / `Ctrl-P` | Search / next / previous |
 | `Ctrl-R` | Replace current; `Ctrl-A` in prompt replaces all |
 | `Ctrl-Z` / `Ctrl-Y` | Undo / redo |
@@ -67,6 +72,9 @@ Marko works perfectly alongside external automations, scripts, or AI assistants.
 | `Ctrl-G` | Cycle theme |
 | `Ctrl-K` | Toggle focus mode (Goyo-style) |
 | `Ctrl-Q` | Quit |
+
+> Italic is on `Ctrl-E` rather than `Ctrl-I` because in terminals `Ctrl-I` is
+> the same key as `Tab`, which Marko uses to navigate table cells.
 
 ## Install
 

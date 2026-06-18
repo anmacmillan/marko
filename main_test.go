@@ -602,10 +602,12 @@ func TestEmphasisAt(t *testing.T) {
 		{"**bold**", 2, 6},
 		{"*italic*", 1, 7},
 		{"~~strike~~", 2, 8},
+		{"==mark==", 2, 6},
+		{"<u>under</u>", 3, 8},
 		{"plain", 0, 0},
 	}
 	for _, test := range tests {
-		size, style, end := emphasisAt([]rune(test.text), 0)
+		size, _, style, end := emphasisAt([]rune(test.text), 0)
 		if size != test.markerSize || end != test.end {
 			t.Fatalf("emphasisAt(%q) = %d, %d; want %d, %d", test.text, size, end, test.markerSize, test.end)
 		}
@@ -1237,5 +1239,240 @@ func TestSaveProtectsExternalChanges(t *testing.T) {
 	}
 	if string(data) != "external" || !e.conflict {
 		t.Fatalf("external change overwritten: data=%q conflict=%t", data, e.conflict)
+	}
+}
+
+func TestToggleEmphasisBoldWrapsSelection(t *testing.T) {
+	e := &editor{
+		lines:     []string{"hello world"},
+		x:         5, y: 0,
+		selX:      0, selY: 0,
+		selecting: true,
+	}
+	e.toggleEmphasis("**", "**")
+	if got, want := e.lines[0], "**hello** world"; got != want {
+		t.Fatalf("wrap: line = %q, want %q", got, want)
+	}
+	if e.x != 7 || e.y != 0 {
+		t.Fatalf("wrap: cursor = (%d,%d), want (7,0)", e.x, e.y)
+	}
+}
+
+func TestToggleEmphasisBoldUnwraps(t *testing.T) {
+	e := &editor{
+		lines:     []string{"**hello** world"},
+		x:         7, y: 0,
+		selX:      2, selY: 0,
+		selecting: true,
+	}
+	e.toggleEmphasis("**", "**")
+	if got, want := e.lines[0], "hello world"; got != want {
+		t.Fatalf("unwrap: line = %q, want %q", got, want)
+	}
+	if e.x != 5 {
+		t.Fatalf("unwrap: cursor = %d, want 5", e.x)
+	}
+}
+
+func TestToggleEmphasisUnderlineWrapUnwrap(t *testing.T) {
+	e := &editor{
+		lines:     []string{"a note here"},
+		x:         6, y: 0,
+		selX:      2, selY: 0,
+		selecting: true,
+	}
+	e.toggleEmphasis("<u>", "</u>")
+	if got, want := e.lines[0], "a <u>note</u> here"; got != want {
+		t.Fatalf("underline wrap: line = %q, want %q", got, want)
+	}
+	// Selection now covers "note" inside the markers; toggle again unwraps.
+	e.selX, e.x = 5, 9 // inside <u>...</u> wrapping "note"
+	e.toggleEmphasis("<u>", "</u>")
+	if got, want := e.lines[0], "a note here"; got != want {
+		t.Fatalf("underline unwrap: line = %q, want %q", got, want)
+	}
+}
+
+func TestToggleEmphasisHighlightWrapUnwrap(t *testing.T) {
+	e := &editor{
+		lines:     []string{"key point"},
+		x:         9, y: 0,
+		selX:      4, selY: 0,
+		selecting: true,
+	}
+	e.toggleEmphasis("==", "==")
+	if got, want := e.lines[0], "key ==point=="; got != want {
+		t.Fatalf("highlight wrap: line = %q, want %q", got, want)
+	}
+	// Selection now covers "point" inside the markers; toggle again unwraps.
+	e.selX, e.x = 6, 11 // inside ==...== wrapping "point"
+	e.toggleEmphasis("==", "==")
+	if got, want := e.lines[0], "key point"; got != want {
+		t.Fatalf("highlight unwrap: line = %q, want %q", got, want)
+	}
+}
+
+func TestToggleEmphasisNoSelectionInsertsMarkers(t *testing.T) {
+	e := &editor{lines: []string{"word"}, x: 0, y: 0}
+	e.toggleEmphasis("**", "**")
+	if got, want := e.lines[0], "****word"; got != want {
+		t.Fatalf("empty bold: line = %q, want %q", got, want)
+	}
+	if e.x != 2 {
+		t.Fatalf("empty bold: cursor = %d, want 2 (inside markers)", e.x)
+	}
+}
+
+func TestCtrlBBoldKeybind(t *testing.T) {
+	e := &editor{
+		lines:     []string{"plain"},
+		x:         5, y: 0,
+		selX:      0, selY: 0,
+		selecting: true,
+	}
+	e.key(tcell.NewEventKey(tcell.KeyCtrlB, 0, tcell.ModCtrl))
+	if got, want := e.lines[0], "**plain**"; got != want {
+		t.Fatalf("Ctrl-B: line = %q, want %q", got, want)
+	}
+}
+
+func TestCtrlHHighlightKeybind(t *testing.T) {
+	e := &editor{
+		lines:     []string{"plain"},
+		x:         5, y: 0,
+		selX:      0, selY: 0,
+		selecting: true,
+	}
+	e.key(tcell.NewEventKey(tcell.KeyCtrlH, 0, tcell.ModCtrl))
+	if got, want := e.lines[0], "==plain=="; got != want {
+		t.Fatalf("Ctrl-H: line = %q, want %q", got, want)
+	}
+}
+
+func TestCtrlEItalicKeybindAndRecentOnShift(t *testing.T) {
+	// Plain Ctrl-E toggles italic.
+	e := &editor{
+		lines:     []string{"plain"},
+		x:         5, y: 0,
+		selX:      0, selY: 0,
+		selecting: true,
+	}
+	e.key(tcell.NewEventKey(tcell.KeyCtrlE, 0, tcell.ModCtrl))
+	if got, want := e.lines[0], "*plain*"; got != want {
+		t.Fatalf("Ctrl-E italic: line = %q, want %q", got, want)
+	}
+	// Ctrl-Shift-E opens the recent panel rather than toggling italic.
+	e2 := &editor{lines: []string{"plain"}}
+	e2.key(tcell.NewEventKey(tcell.KeyCtrlE, 0, tcell.ModCtrl|tcell.ModShift))
+	if !e2.showRecent {
+		t.Fatal("Ctrl-Shift-E did not open recent files")
+	}
+	if got := e2.lines[0]; got != "plain" {
+		t.Fatalf("Ctrl-Shift-E mutated text: %q", got)
+	}
+}
+
+func TestCtrlUUnderlineKeybind(t *testing.T) {
+	e := &editor{
+		lines:     []string{"plain"},
+		x:         5, y: 0,
+		selX:      0, selY: 0,
+		selecting: true,
+	}
+	e.key(tcell.NewEventKey(tcell.KeyCtrlU, 0, tcell.ModCtrl))
+	if got, want := e.lines[0], "<u>plain</u>"; got != want {
+		t.Fatalf("Ctrl-U: line = %q, want %q", got, want)
+	}
+}
+
+func TestCtrlASelectAll(t *testing.T) {
+	e := &editor{lines: []string{"one", "two", "three"}, x: 1, y: 1}
+	e.key(tcell.NewEventKey(tcell.KeyCtrlA, 0, tcell.ModCtrl))
+	if !e.selecting {
+		t.Fatal("Ctrl-A did not enable selection")
+	}
+	if e.selX != 0 || e.selY != 0 {
+		t.Fatalf("Ctrl-A anchor = (%d,%d), want (0,0)", e.selX, e.selY)
+	}
+	if e.y != 2 || e.x != 5 {
+		t.Fatalf("Ctrl-A cursor = (%d,%d), want (5,2)", e.x, e.y)
+	}
+	_, _, bx, by, ok := e.selectionBounds()
+	if !ok || by != 2 || bx != 5 {
+		t.Fatalf("Ctrl-A selection bounds = (%d,%d) ok=%t, want (5,2)", bx, by, ok)
+	}
+}
+
+func TestInlinePlainTextStripsUnderlineAndHighlight(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"<u>under</u>", "under"},
+		{"==mark==", "mark"},
+		{"**bold**", "bold"},
+		{"plain", "plain"},
+	}
+	for _, tc := range tests {
+		if got := inlinePlainText(tc.in); got != tc.want {
+			t.Fatalf("inlinePlainText(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestWrappedLineEmphasisRenders(t *testing.T) {
+	// A long paragraph that must wrap across two rows, with bold spanning the
+	// wrap. The continuation row must not leak the ** markers.
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	width := 20
+	screen.SetSize(width, 3)
+	body := "leading words then **bold bit trailing** text tail"
+	e := &editor{
+		screen: screen,
+		lines:  []string{body},
+		theme:  themeByName("calm"),
+		y:      5, // cursor elsewhere: line is not "current"
+	}
+	rows := e.visualRows(width)
+	if len(rows) < 2 {
+		t.Fatalf("visualRows() = %d rows, want >=2", len(rows))
+	}
+	for row, vr := range rows {
+		e.drawVisualLine(0, row, vr, false, width)
+	}
+	for row := 0; row < len(rows); row++ {
+		got := simulationLine(screen, row, width)
+		if strings.Contains(got, "**") {
+			t.Fatalf("row %d leaked ** markers: %q", row, got)
+		}
+	}
+}
+
+func TestUntitledSavePrompts(t *testing.T) {
+	e := &editor{lines: []string{"x"}, path: "20260618_untitled.md", untitled: true}
+	e.key(tcell.NewEventKey(tcell.KeyCtrlS, 0, tcell.ModCtrl))
+	if e.prompt != "Save as: " {
+		t.Fatalf("untitled Ctrl-S prompt = %q, want %q", e.prompt, "Save as: ")
+	}
+	if e.promptValue != "untitled.md" {
+		t.Fatalf("untitled Ctrl-S promptValue = %q, want untitled.md", e.promptValue)
+	}
+}
+
+func TestNamedSaveDoesNotPrompt(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "named.md")
+	e := &editor{lines: []string{"x"}, path: path, untitled: false}
+	e.key(tcell.NewEventKey(tcell.KeyCtrlS, 0, tcell.ModCtrl))
+	if e.prompt != "" {
+		t.Fatalf("named Ctrl-S prompted %q, wanted direct save", e.prompt)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "x" {
+		t.Fatalf("named Ctrl-S wrote %q, want %q", data, "x")
 	}
 }
