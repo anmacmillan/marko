@@ -911,7 +911,7 @@ func (e *editor) submitPrompt() {
 			e.status = err.Error()
 			return
 		}
-		e.openFile(expanded)
+		e.openPath(expanded)
 		return
 	}
 	path := strings.TrimSpace(e.promptValue)
@@ -954,6 +954,36 @@ func (e *editor) defaultSaveName() string {
 		return filepath.Base(e.path)
 	}
 	return "untitled.md"
+}
+
+func (e *editor) openPath(path string) {
+	if info, err := os.Stat(path); err == nil && info.IsDir() {
+		e.newFileAt(filepath.Join(path, "untitled.md"))
+		return
+	}
+	if filepath.Ext(path) == "" {
+		path += ".md"
+	}
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		e.newFileAt(path)
+		return
+	}
+	e.openFile(path)
+}
+
+func (e *editor) newFileAt(path string) {
+	e.showStartMenu = false
+	e.showRecent = false
+	e.path = path
+	e.untitled = false
+	e.lines = []string{""}
+	e.x, e.y, e.top = 0, 0, 0
+	e.undo, e.redo = nil, nil
+	e.dirty = true
+	e.selecting = false
+	e.conflict = false
+	e.modTime = time.Time{}
+	e.status = "New file " + path
 }
 
 func (e *editor) startMenuKey(ev *tcell.EventKey) bool {
