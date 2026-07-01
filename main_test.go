@@ -1505,7 +1505,36 @@ func TestShortcutCoachRendersStartupHint(t *testing.T) {
 		rendered.WriteByte('\n')
 	}
 	text := rendered.String()
-	for _, want := range []string{"Marko shortcuts", "F2 save as", "F3 recent", "Ctrl-A select all", "F1 more"} {
+	for _, want := range []string{"MARKO", "F2 save as", "F3 recent", "Ctrl-A select all", "F1 more"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("shortcut coach did not render %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestShortcutCoachRendersMarkoTextArt(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(72, 14)
+	e := &editor{
+		screen:    screen,
+		path:      "note.md",
+		lines:     []string{"hello"},
+		theme:     themeByName("calm"),
+		showCoach: true,
+		status:    "ready",
+	}
+	e.draw()
+	var rendered strings.Builder
+	for row := 0; row < 14; row++ {
+		rendered.WriteString(simulationLine(screen, row, 72))
+		rendered.WriteByte('\n')
+	}
+	text := rendered.String()
+	for _, want := range []string{"MARKO", "Markdown focus", "F2 save as", "F3 recent"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("shortcut coach did not render %q:\n%s", want, text)
 		}
@@ -1526,6 +1555,89 @@ func TestShortcutCoachDismissesOnKeyAndF1OpensHelp(t *testing.T) {
 	}
 	if !e.showHelp {
 		t.Fatal("F1 did not open full help")
+	}
+}
+
+func TestShortcutCoachExpiresAfterFiveSeconds(t *testing.T) {
+	e := &editor{lines: []string{""}, theme: themeByName("calm"), showCoach: true, coachUntil: time.Now().Add(-time.Second)}
+	e.tick()
+	if e.showCoach {
+		t.Fatal("shortcut coach stayed visible after expiry")
+	}
+}
+
+func TestStartMenuRendersNewRecentAndOpenPath(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(80, 18)
+	e := &editor{
+		screen:        screen,
+		lines:         []string{""},
+		theme:         themeByName("calm"),
+		showStartMenu: true,
+		recent:        []string{"/tmp/one.md"},
+	}
+	e.draw()
+	var rendered strings.Builder
+	for row := 0; row < 18; row++ {
+		rendered.WriteString(simulationLine(screen, row, 80))
+		rendered.WriteByte('\n')
+	}
+	text := rendered.String()
+	for _, want := range []string{"MARKO", "New document", "/tmp/one.md", "Open path", "F1 help"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("start menu did not render %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestStartMenuKeyActions(t *testing.T) {
+	e := &editor{lines: []string{""}, theme: themeByName("calm"), showStartMenu: true, recent: []string{"/tmp/one.md"}}
+
+	e.key(tcell.NewEventKey(tcell.KeyRune, 'o', 0))
+	if e.prompt != "Open path: " {
+		t.Fatalf("open path prompt = %q, want Open path: ", e.prompt)
+	}
+	if e.showStartMenu {
+		t.Fatal("start menu stayed visible after Open path")
+	}
+
+	e = &editor{lines: []string{""}, theme: themeByName("calm"), showStartMenu: true}
+	e.key(tcell.NewEventKey(tcell.KeyRune, 'n', 0))
+	if e.showStartMenu {
+		t.Fatal("start menu stayed visible after New document")
+	}
+	if !e.untitled {
+		t.Fatal("new document did not mark editor untitled")
+	}
+}
+
+func TestStartMenuCanShowHelpOverlay(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(100, 24)
+	e := &editor{
+		screen:        screen,
+		lines:         []string{""},
+		theme:         themeByName("calm"),
+		showStartMenu: true,
+	}
+	e.key(tcell.NewEventKey(tcell.KeyF1, 0, 0))
+	e.draw()
+	var rendered strings.Builder
+	for row := 0; row < 24; row++ {
+		rendered.WriteString(simulationLine(screen, row, 100))
+		rendered.WriteByte('\n')
+	}
+	text := rendered.String()
+	if !strings.Contains(text, "Marko help") {
+		t.Fatalf("start menu help overlay missing:\n%s", text)
 	}
 }
 

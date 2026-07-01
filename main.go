@@ -46,6 +46,8 @@ type editor struct {
 	conflict        bool
 	showHelp        bool
 	showCoach       bool
+	coachUntil      time.Time
+	showStartMenu   bool
 	showRecent      bool
 	recent          []string
 	recentIndex     int
@@ -127,8 +129,13 @@ func newEditor(path string, untitled bool) (*editor, error) {
 	s.EnablePaste()
 	status := "F1 shortcuts · Ctrl-A select all · Ctrl-C copy · Ctrl-H highlight · Ctrl-S save"
 	themeName := selectedThemeName()
-	e := &editor{screen: s, path: path, untitled: untitled, lines: lines, status: status, themeName: themeName, theme: themeByName(themeName), lastAction: time.Now(), modTime: modTime, showCoach: true}
-	e.rememberRecent(path)
+	now := time.Now()
+	e := &editor{screen: s, path: path, untitled: untitled, lines: lines, status: status, themeName: themeName, theme: themeByName(themeName), lastAction: now, modTime: modTime, showCoach: !untitled, coachUntil: now.Add(5 * time.Second), showStartMenu: untitled}
+	if !untitled {
+		e.rememberRecent(path)
+	} else {
+		e.recent = loadRecent()
+	}
 	return e, nil
 }
 
@@ -254,15 +261,7 @@ func (e *editor) run() {
 		case *tcell.EventResize:
 			e.screen.Sync()
 		case *tcell.EventInterrupt:
-			e.autosave()
-			if e.externalChange() {
-				if !e.dirty {
-					e.reloadFile()
-				} else {
-					e.conflict = true
-					e.status = "File changed outside Marko. Use Save As or reopen it."
-				}
-			}
+			e.tick()
 		case *tcell.EventKey:
 			e.lastAction, e.manualScroll = time.Now(), false
 			if e.key(ev) {
@@ -278,6 +277,24 @@ func (e *editor) run() {
 				e.insertText(string(ev.Data()))
 				e.waitingForPaste = false
 			}
+		}
+	}
+}
+
+func (e *editor) tick() {
+	if e.showCoach && !e.coachUntil.IsZero() && time.Now().After(e.coachUntil) {
+		e.showCoach = false
+	}
+	if e.showStartMenu {
+		return
+	}
+	e.autosave()
+	if e.externalChange() {
+		if !e.dirty {
+			e.reloadFile()
+		} else {
+			e.conflict = true
+			e.status = "File changed outside Marko. Use Save As or reopen it."
 		}
 	}
 }
@@ -503,6 +520,9 @@ func textInputModifiers(mod tcell.ModMask) bool {
 }
 
 func (e *editor) key(ev *tcell.EventKey) bool {
+	if e.showStartMenu {
+		return e.startMenuKey(ev)
+	}
 	if e.showRecent {
 		e.recentKey(ev)
 		return false
@@ -768,6 +788,16 @@ func (e *editor) promptKey(ev *tcell.EventKey) {
 			e.prompt, e.promptValue = "", ""
 			return
 		}
+		if e.prompt == "Open path: " {
+			path := strings.TrimSpace(e.promptValue)
+			e.prompt, e.promptValue = "", ""
+			if path == "" {
+				e.status = "Enter a filename"
+				return
+			}
+			e.openFile(expandUserPath(path))
+			return
+		}
 		path := strings.TrimSpace(e.promptValue)
 		if path == "" {
 			e.status = "Enter a filename"
@@ -803,6 +833,52 @@ func (e *editor) promptKey(ev *tcell.EventKey) {
 			e.findFromStart()
 		}
 	}
+}
+
+func (e *editor) startMenuKey(ev *tcell.EventKey) bool {
+	switch eventKey(ev) {
+	case tcell.KeyCtrlQ:
+		return true
+	case tcell.KeyF1:
+		e.showHelp = !e.showHelp
+	case tcell.KeyF3:
+		e.openRecentFiles()
+		e.showStartMenu = false
+	case tcell.KeyEnter:
+		if len(e.recent) > 0 {
+			e.showStartMenu = false
+			e.openFile(e.recent[0])
+		} else {
+			e.newUntitledDocument()
+		}
+	case tcell.KeyRune:
+		switch strings.ToLower(string(ev.Rune())) {
+		case "n":
+			e.newUntitledDocument()
+		case "o":
+			e.showStartMenu = false
+			e.prompt = "Open path: "
+			e.promptValue = ""
+		case "r":
+			e.openRecentFiles()
+			e.showStartMenu = false
+		case "q":
+			return true
+		}
+	}
+	return false
+}
+
+func (e *editor) newUntitledDocument() {
+	e.showStartMenu = false
+	e.lines = []string{""}
+	e.x, e.y, e.top = 0, 0, 0
+	e.path = uniqueUntitledPath(time.Now(), ".")
+	e.untitled = true
+	e.dirty = false
+	e.conflict = false
+	e.modTime = time.Time{}
+	e.status = "New document"
 }
 
 func (e *editor) openSaveAsPrompt() {
@@ -1652,6 +1728,14 @@ func (e *editor) autosave() {
 func (e *editor) draw() {
 	e.screen.Clear()
 	w, h := e.screen.Size()
+	if e.showStartMenu {
+		e.drawStartMenu(w, h)
+		if e.showHelp {
+			e.drawHelp(w, h)
+		}
+		e.screen.Show()
+		return
+	}
 	statusRows := 1
 	if e.focusMode {
 		statusRows = 0
@@ -1857,7 +1941,8 @@ func (e *editor) drawHelp(w, h int) {
 
 func (e *editor) drawCoach(w, h int) {
 	lines := []string{
-		" Marko shortcuts ",
+		" MARKO ",
+		"Markdown focus",
 		"F2 save as   F3 recent   Ctrl-A select all",
 		"F1 more   Esc dismiss",
 	}
@@ -1874,6 +1959,50 @@ func (e *editor) drawCoach(w, h int) {
 	for row, line := range lines {
 		e.put(x+2, y+1+row, line, box, w)
 	}
+}
+
+func (e *editor) drawStartMenu(w, h int) {
+	bg := tcell.StyleDefault.Background(e.theme.background).Foreground(e.theme.text)
+	for row := 0; row < h; row++ {
+		e.put(0, row, strings.Repeat(" ", w), bg, w)
+	}
+	lines := []string{
+		" MARKO ",
+		"Markdown focus",
+		"",
+		"[N] New document",
+		"",
+		"Recent files",
+	}
+	if len(e.recent) == 0 {
+		lines = append(lines, "  No recent files")
+	} else {
+		for _, path := range e.recent {
+			lines = append(lines, "  "+path)
+		}
+	}
+	lines = append(lines, "", "[O] Open path...", "F1 help   F3 recent   Q quit")
+	width := 0
+	for _, line := range lines {
+		width = max(width, min(runeLen(line), max(20, w-8)))
+	}
+	x := max(0, (w-width-4)/2)
+	y := max(0, (h-len(lines)-2)/2)
+	box := tcell.StyleDefault.Background(e.theme.statusBG).Foreground(e.theme.statusFG)
+	for row := 0; row < len(lines)+2 && y+row < h; row++ {
+		e.put(x, y+row, strings.Repeat(" ", min(w-x, width+4)), box, w)
+	}
+	for row, line := range lines {
+		if runeLen(line) > width {
+			line = string([]rune(line)[:width])
+		}
+		style := box
+		if row == 0 {
+			style = style.Bold(true)
+		}
+		e.put(x+2, y+1+row, line, style, min(w, x+2+width))
+	}
+	e.screen.HideCursor()
 }
 
 func (e *editor) drawRecent(w, h int) {
