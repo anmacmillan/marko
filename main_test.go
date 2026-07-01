@@ -862,6 +862,26 @@ func TestSavePromptExpandsHomeDirectory(t *testing.T) {
 	}
 }
 
+func TestPromptSupportsMiddleEditing(t *testing.T) {
+	e := &editor{prompt: "Save as: ", promptValue: "untitled.md", promptCursor: runeLen("untitled.md")}
+	e.promptKey(tcell.NewEventKey(tcell.KeyHome, 0, tcell.ModNone))
+	if e.promptCursor != 0 {
+		t.Fatalf("home cursor = %d, want 0", e.promptCursor)
+	}
+	e.promptKey(tcell.NewEventKey(tcell.KeyDelete, 0, tcell.ModNone))
+	if got, want := e.promptValue, "ntitled.md"; got != want {
+		t.Fatalf("delete at home = %q, want %q", got, want)
+	}
+	e.promptKey(tcell.NewEventKey(tcell.KeyRight, 0, tcell.ModNone))
+	e.promptKey(tcell.NewEventKey(tcell.KeyRune, 'z', 0))
+	if got, want := e.promptValue, "nztitled.md"; got != want {
+		t.Fatalf("insert in middle = %q, want %q", got, want)
+	}
+	if e.promptCursor != 2 {
+		t.Fatalf("cursor after insert = %d, want 2", e.promptCursor)
+	}
+}
+
 func TestDatedUntitledPath(t *testing.T) {
 	now := time.Date(2026, 12, 30, 9, 0, 0, 0, time.UTC)
 	if got, want := datedUntitledPath(now), "20261230_untitled.md"; got != want {

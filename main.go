@@ -25,6 +25,7 @@ type editor struct {
 	preferredX      int
 	prompt          string
 	promptValue     string
+	promptCursor    int
 	lastEdit        time.Time
 	recovery        string
 	theme           theme
@@ -627,6 +628,7 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 	case tcell.KeyCtrlF:
 		e.prompt = "Find: "
 		e.promptValue = e.search
+		e.promptCursor = runeLen(e.promptValue)
 	case tcell.KeyCtrlN:
 		e.findNext()
 	case tcell.KeyCtrlP:
@@ -636,12 +638,15 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 			e.prompt = "Rename to: "
 			e.promptValue = e.path
 			e.renameFrom = e.path
+			e.promptCursor = runeLen(e.promptValue)
 		} else if e.search == "" {
 			e.prompt = "Find: "
 			e.promptValue = ""
+			e.promptCursor = 0
 		} else {
 			e.prompt = "Replace with: "
 			e.promptValue = e.replace
+			e.promptCursor = runeLen(e.promptValue)
 		}
 	case tcell.KeyCtrlC:
 		e.copySelection()
@@ -808,29 +813,29 @@ func (e *editor) cycleTheme() {
 func (e *editor) promptKey(ev *tcell.EventKey) {
 	switch eventKey(ev) {
 	case tcell.KeyEsc:
-		e.prompt, e.promptValue = "", ""
+		e.prompt, e.promptValue, e.promptCursor = "", "", 0
 		e.status = "Cancelled"
 	case tcell.KeyEnter:
 		if e.prompt == "Find: " {
 			e.search = e.promptValue
-			e.prompt, e.promptValue = "", ""
+			e.prompt, e.promptValue, e.promptCursor = "", "", 0
 			e.findNext()
 			return
 		}
 		if e.prompt == "Replace with: " {
 			e.replace = e.promptValue
-			e.prompt, e.promptValue = "", ""
+			e.prompt, e.promptValue, e.promptCursor = "", "", 0
 			e.replaceCurrent()
 			return
 		}
 		if e.prompt == "Rename to: " {
 			e.renameFile(e.promptValue)
-			e.prompt, e.promptValue = "", ""
+			e.prompt, e.promptValue, e.promptCursor = "", "", 0
 			return
 		}
 		if e.prompt == "Open path: " {
 			path := strings.TrimSpace(e.promptValue)
-			e.prompt, e.promptValue = "", ""
+			e.prompt, e.promptValue, e.promptCursor = "", "", 0
 			if path == "" {
 				e.status = "Enter a filename"
 				return
@@ -860,12 +865,30 @@ func (e *editor) promptKey(ev *tcell.EventKey) {
 		e.untitled = false
 		e.conflict = false
 		e.modTime = time.Time{}
-		e.prompt, e.promptValue = "", ""
+		e.prompt, e.promptValue, e.promptCursor = "", "", 0
 		e.save()
+	case tcell.KeyLeft:
+		if e.promptCursor > 0 {
+			e.promptCursor--
+		}
+	case tcell.KeyRight:
+		if e.promptCursor < runeLen(e.promptValue) {
+			e.promptCursor++
+		}
+	case tcell.KeyHome:
+		e.promptCursor = 0
+	case tcell.KeyEnd:
+		e.promptCursor = runeLen(e.promptValue)
+	case tcell.KeyDelete:
+		r := []rune(e.promptValue)
+		if e.promptCursor < len(r) {
+			e.promptValue = string(r[:e.promptCursor]) + string(r[e.promptCursor+1:])
+		}
 	case tcell.KeyBackspace, tcell.KeyBackspace2:
 		r := []rune(e.promptValue)
-		if len(r) > 0 {
-			e.promptValue = string(r[:len(r)-1])
+		if e.promptCursor > 0 && e.promptCursor <= len(r) {
+			e.promptValue = string(r[:e.promptCursor-1]) + string(r[e.promptCursor:])
+			e.promptCursor--
 		}
 		if e.prompt == "Find: " {
 			e.search = e.promptValue
@@ -873,11 +896,14 @@ func (e *editor) promptKey(ev *tcell.EventKey) {
 	case tcell.KeyCtrlA:
 		if e.prompt == "Replace with: " {
 			e.replace = e.promptValue
-			e.prompt, e.promptValue = "", ""
+			e.prompt, e.promptValue, e.promptCursor = "", "", 0
 			e.replaceAll()
 		}
 	case tcell.KeyRune:
-		e.promptValue += string(ev.Rune())
+		r := []rune(e.promptValue)
+		insert := []rune{ev.Rune()}
+		e.promptValue = string(r[:e.promptCursor]) + string(insert) + string(r[e.promptCursor:])
+		e.promptCursor++
 		if e.prompt == "Find: " {
 			e.search = e.promptValue
 			e.findFromStart()
@@ -931,7 +957,7 @@ func (e *editor) openStartMenu() {
 	e.showStartMenu = true
 	e.showRecent = false
 	e.showHelp = false
-	e.prompt, e.promptValue = "", ""
+	e.prompt, e.promptValue, e.promptCursor = "", "", 0
 	e.startMenuIndex = 0
 }
 
@@ -974,6 +1000,7 @@ func (e *editor) activateStartMenuAction(action string) bool {
 		e.showStartMenu = false
 		e.prompt = "Open path: "
 		e.promptValue = ""
+		e.promptCursor = 0
 	case action == "recent":
 		e.openRecentFiles()
 		e.showStartMenu = false
@@ -1009,6 +1036,7 @@ func (e *editor) openSaveAsPrompt() {
 	} else {
 		e.promptValue = e.path
 	}
+	e.promptCursor = runeLen(e.promptValue)
 }
 
 func (e *editor) openRecentFiles() {
@@ -2000,7 +2028,7 @@ func (e *editor) draw() {
 		e.drawCoach(w, h)
 	}
 	if e.prompt != "" {
-		e.screen.ShowCursor(1+runeLen(e.prompt)+runeLen(e.promptValue), h-1)
+		e.screen.ShowCursor(1+runeLen(e.prompt)+e.promptCursor, h-1)
 	} else {
 		vr := rows[cursorRow]
 		if cursorRow >= e.top && cursorRow < e.top+bodyH {
