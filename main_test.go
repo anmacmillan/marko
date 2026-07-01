@@ -1314,10 +1314,11 @@ func TestExternalChange(t *testing.T) {
 	}
 }
 
-func TestLoadRecentRemovesMissingAndLimitsFive(t *testing.T) {
+func TestLoadRecentKeepsMissingAndLimitsFive(t *testing.T) {
 	oldConfig := os.Getenv("XDG_CONFIG_HOME")
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("HOME", dir)
 	defer os.Setenv("XDG_CONFIG_HOME", oldConfig)
 
 	var paths []string
@@ -1336,7 +1337,7 @@ func TestLoadRecentRemovesMissingAndLimitsFive(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := loadRecent()
-	if len(got) != 5 || got[0] != paths[1] {
+	if len(got) != 5 || got[0] != paths[0] || got[1] != paths[1] {
 		t.Fatalf("loadRecent() = %#v", got)
 	}
 }
@@ -1344,6 +1345,7 @@ func TestLoadRecentRemovesMissingAndLimitsFive(t *testing.T) {
 func TestRememberRecentMovesFileToFront(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("HOME", dir)
 	first := filepath.Join(dir, "first.md")
 	second := filepath.Join(dir, "second.md")
 	_ = os.WriteFile(first, nil, 0644)
@@ -1462,6 +1464,7 @@ func TestJournalPathIsInsideConfig(t *testing.T) {
 func TestAutosaveWritesThenRemovesRecoveryJournal(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("HOME", dir)
 	path := filepath.Join(dir, "doc.md")
 	e := &editor{path: path, lines: []string{"recovered £ text"}, dirty: true, lastEdit: time.Now().Add(-3 * time.Second)}
 	e.autosave()
@@ -1480,6 +1483,7 @@ func TestAutosaveWritesThenRemovesRecoveryJournal(t *testing.T) {
 func TestSaveMovesFileIntoRecentList(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("HOME", dir)
 	path := filepath.Join(dir, "new-note.md")
 	e := &editor{path: path, lines: []string{"hello"}, dirty: true}
 	e.save()
@@ -1965,6 +1969,9 @@ func TestStartMenuCanShowHelpOverlay(t *testing.T) {
 }
 
 func TestRecentPanelUsesBracketedEmptyStateAndSplitFooter(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("HOME", dir)
 	screen := tcell.NewSimulationScreen("UTF-8")
 	if err := screen.Init(); err != nil {
 		t.Fatal(err)
@@ -1995,6 +2002,7 @@ func TestRecentPanelUsesBracketedEmptyStateAndSplitFooter(t *testing.T) {
 func TestRecentPanelRefreshesFromDisk(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("HOME", dir)
 	path := filepath.Join(dir, "note.md")
 	if err := os.WriteFile(path, []byte("hello"), 0644); err != nil {
 		t.Fatal(err)
@@ -2030,9 +2038,103 @@ func TestRecentPanelRefreshesFromDisk(t *testing.T) {
 	}
 }
 
+func TestRecentPanelGroupsByAge(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("HOME", dir)
+	now := time.Now()
+	fresh := filepath.Join(dir, "fresh.md")
+	week := filepath.Join(dir, "week.md")
+	old := filepath.Join(dir, "old.md")
+	for _, item := range []struct {
+		path string
+		when time.Time
+	}{
+		{fresh, now.Add(-2 * time.Hour)},
+		{week, now.Add(-3 * 24 * time.Hour)},
+		{old, now.Add(-12 * 24 * time.Hour)},
+	} {
+		if err := os.WriteFile(item.path, []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(item.path, item.when, item.when); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(recentConfigPath()), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(recentConfigPath(), []byte(strings.Join([]string{fresh, week, old}, "\n")), 0644); err != nil {
+		t.Fatal(err)
+	}
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(110, 20)
+	e := &editor{
+		screen:     screen,
+		lines:      []string{"x"},
+		theme:      themeByName("calm"),
+		showRecent: true,
+	}
+	e.draw()
+	var rendered strings.Builder
+	for row := 0; row < 20; row++ {
+		rendered.WriteString(simulationLine(screen, row, 110))
+		rendered.WriteByte('\n')
+	}
+	text := rendered.String()
+	for _, want := range []string{"Past 48 hours", "Past week", "Older", "fresh.md", "week.md", "old.md"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("grouped recent panel missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Index(text, "Past 48 hours") > strings.Index(text, "Past week") || strings.Index(text, "Past week") > strings.Index(text, "Older") {
+		t.Fatalf("recent groups out of order:\n%s", text)
+	}
+}
+
+func TestRecentPanelShowsMissingFilesSection(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("HOME", dir)
+	missing := "missing.md"
+	if err := os.MkdirAll(filepath.Dir(recentConfigPath()), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(recentConfigPath(), []byte(missing+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(100, 16)
+	e := &editor{
+		screen:     screen,
+		lines:      []string{"x"},
+		theme:      themeByName("calm"),
+		showRecent: true,
+	}
+	e.draw()
+	var rendered strings.Builder
+	for row := 0; row < 16; row++ {
+		rendered.WriteString(simulationLine(screen, row, 100))
+		rendered.WriteByte('\n')
+	}
+	text := rendered.String()
+	if !strings.Contains(text, "Missing files") || !strings.Contains(text, "missing.md (missing)") {
+		t.Fatalf("recent panel did not surface missing history:\n%s", text)
+	}
+}
+
 func TestRecentPanelShowsRecencyGradient(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("HOME", dir)
 	oldPath := filepath.Join(dir, "old.md")
 	newPath := filepath.Join(dir, "new.md")
 	if err := os.WriteFile(oldPath, []byte("old"), 0644); err != nil {
@@ -2164,7 +2266,7 @@ func TestSavePromptShowsZoxideHint(t *testing.T) {
 	}
 	e.draw()
 	got := simulationLine(screen, 2, 80)
-	if !strings.Contains(got, "[~/..., z query/file.md]") {
+	if !strings.Contains(got, "[z query/file.md, or type a path]") {
 		t.Fatalf("save prompt hint missing: %q", got)
 	}
 }

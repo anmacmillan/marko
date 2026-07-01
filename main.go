@@ -246,9 +246,7 @@ func loadRecent() []string {
 	var recent []string
 	for _, path := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 		if path != "" {
-			if _, err := os.Stat(path); err == nil {
-				recent = append(recent, path)
-			}
+			recent = append(recent, path)
 		}
 		if len(recent) == 5 {
 			break
@@ -2029,7 +2027,7 @@ func (e *editor) draw() {
 	if e.prompt != "" {
 		status = " " + e.prompt + e.promptValue
 		if e.prompt == "Save as: " || e.prompt == "Open path: " {
-			status += "  [~/..., z query/file.md]"
+			status += "  [z query/file.md, or type a path]"
 		}
 	}
 	if !e.focusMode || e.prompt != "" {
@@ -2185,7 +2183,7 @@ func (e *editor) drawHelp(w, h int) {
 		"Ctrl-K           Focus mode",
 		"Ctrl-Shift-E     Recent files",
 		"Ctrl-G           Cycle theme",
-		"Open/Save path   Use z query/file.md for zoxide",
+		"Open/Save path   Use z query/file.md, or type a path",
 	}
 	width := 0
 	for _, line := range lines {
@@ -2280,21 +2278,18 @@ func (e *editor) drawStartMenu(w, h int) {
 
 func (e *editor) drawRecent(w, h int) {
 	e.recent = loadRecent()
-	lines := []string{" Recent Markdown files "}
-	for i, path := range e.recent {
-		prefix := "  "
-		if i == e.recentIndex {
-			prefix = "> "
-		}
-		lines = append(lines, prefix+recentDisplayLabel(path, max(24, w-6)))
+	sections := groupedRecentFiles(e.recent)
+	total := 0
+	for _, section := range sections {
+		total += len(section.entries)
 	}
-	if len(e.recent) == 0 {
-		lines = append(lines, "  <No recent files>")
+	if total > 0 && e.recentIndex >= total {
+		e.recentIndex = 0
 	}
-	lines = append(lines, " Up/Down select   Enter open ", " Esc cancel ")
+	lines, total := e.recentPanelLines(sections, max(24, w-6))
 	width := 0
 	for _, line := range lines {
-		width = max(width, min(runeLen(line), max(20, w-6)))
+		width = max(width, min(runeLen(line.text), max(20, w-6)))
 	}
 	x, y := max(0, (w-width-4)/2), max(0, (h-len(lines)-2)/2)
 	box := tcell.StyleDefault.Background(e.theme.statusBG).Foreground(e.theme.statusFG)
@@ -2303,11 +2298,103 @@ func (e *editor) drawRecent(w, h int) {
 	}
 	for row, line := range lines {
 		style := box
-		if row >= 1 && row <= len(e.recent) {
-			style = e.recentStyle(style, row-1, len(e.recent))
+		switch line.kind {
+		case recentLineSection, recentLineTitle:
+			style = style.Bold(true)
+		case recentLineEntry:
+			style = e.recentStyle(style, line.rank, total)
 		}
-		e.put(x+2, y+1+row, line, style, min(w, x+2+width))
+		e.put(x+2, y+1+row, line.text, style, min(w, x+2+width))
 	}
+}
+
+func (e *editor) recentPanelLines(sections []recentFileSection, width int) ([]recentPanelLine, int) {
+	lines := []recentPanelLine{{text: " Recent Markdown files ", kind: recentLineTitle}}
+	total := 0
+	for _, section := range sections {
+		if len(section.entries) == 0 {
+			continue
+		}
+		lines = append(lines, recentPanelLine{text: " " + section.title + " ", kind: recentLineSection})
+		for _, entry := range section.entries {
+			prefix := "  "
+			if entry.rank == e.recentIndex {
+				prefix = "> "
+			}
+			label := entry.path + " (missing)"
+			if !entry.modTime.IsZero() {
+				label = recentDisplayLabel(entry.path, width)
+			}
+			lines = append(lines, recentPanelLine{
+				text: prefix + label,
+				kind: recentLineEntry,
+				rank: entry.rank,
+			})
+			total++
+		}
+	}
+	if total == 0 {
+		lines = append(lines, recentPanelLine{text: "  <No recent files>", kind: recentLineEntry})
+	}
+	lines = append(lines, recentPanelLine{text: " Up/Down select   Enter open ", kind: recentLineSpacer})
+	lines = append(lines, recentPanelLine{text: " Esc cancel ", kind: recentLineSpacer})
+	return lines, total
+}
+
+type recentPanelLineKind int
+
+const (
+	recentLineTitle recentPanelLineKind = iota
+	recentLineSection
+	recentLineEntry
+	recentLineSpacer
+)
+
+type recentPanelLine struct {
+	text string
+	kind recentPanelLineKind
+	rank int
+}
+
+type recentFileSection struct {
+	title   string
+	entries []recentFileItem
+}
+
+type recentFileItem struct {
+	path    string
+	modTime time.Time
+	rank    int
+}
+
+func groupedRecentFiles(paths []string) []recentFileSection {
+	sections := []recentFileSection{
+		{title: "Past 48 hours"},
+		{title: "Past week"},
+		{title: "Older"},
+		{title: "Missing files"},
+	}
+	rank := 0
+	now := time.Now()
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			sections[3].entries = append(sections[3].entries, recentFileItem{path: path, rank: rank})
+			rank++
+			continue
+		}
+		item := recentFileItem{path: path, modTime: info.ModTime(), rank: rank}
+		switch {
+		case now.Sub(item.modTime) <= 48*time.Hour:
+			sections[0].entries = append(sections[0].entries, item)
+		case now.Sub(item.modTime) <= 7*24*time.Hour:
+			sections[1].entries = append(sections[1].entries, item)
+		default:
+			sections[2].entries = append(sections[2].entries, item)
+		}
+		rank++
+	}
+	return sections
 }
 
 func (e *editor) recentStyle(style tcell.Style, rank, total int) tcell.Style {
