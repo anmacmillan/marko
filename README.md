@@ -84,6 +84,8 @@ Download the appropriate binary from [GitHub Releases](https://github.com/anmacm
 
 If you installed from a GitHub release binary, run `marko update` to download and replace it with the latest release for your platform.
 
+Official release binaries are published for macOS (`arm64` and `amd64`), Linux (`arm64` and `amd64`), and Windows (`amd64`).
+
 Or build from source:
 
 ```sh
