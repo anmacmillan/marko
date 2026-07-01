@@ -759,6 +759,53 @@ func TestHeadingOneUsesBoldWithoutUnderline(t *testing.T) {
 	}
 }
 
+func TestHeadingSpacingAddsBlankRows(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(40, 6)
+	e := &editor{
+		screen: screen,
+		lines:  []string{"# Alpha", "bravo"},
+		theme:  themeByName("calm"),
+	}
+	rows := e.visualRows(40)
+	if got, want := len(rows), 4; got != want {
+		t.Fatalf("visualRows() = %d, want %d", got, want)
+	}
+	if rows[0].start != -1 || rows[2].start != -1 {
+		t.Fatalf("heading spacing rows not inserted correctly: %#v", rows)
+	}
+	e.draw()
+	if got := strings.TrimRight(simulationLine(screen, 0, 40), " "); got != "" {
+		t.Fatalf("top heading spacer rendered as %q, want blank", got)
+	}
+	if got := strings.TrimSpace(simulationLine(screen, 1, 40)); got != "Alpha" {
+		t.Fatalf("heading row rendered as %q, want Alpha", got)
+	}
+	if got := strings.TrimRight(simulationLine(screen, 2, 40), " "); got != "" {
+		t.Fatalf("bottom heading spacer rendered as %q, want blank", got)
+	}
+}
+
+func TestHeadingSpacingSkipsVisualNavigationRows(t *testing.T) {
+	e := &editor{
+		lines: []string{"# Alpha", "bravo"},
+		x:     0,
+		y:     0,
+	}
+	e.moveVisualVertical(1)
+	if e.y != 1 || e.x != 0 {
+		t.Fatalf("moveVisualVertical down = (%d,%d), want (1,0)", e.y, e.x)
+	}
+	e.moveVisualVertical(-1)
+	if e.y != 0 || e.x != 0 {
+		t.Fatalf("moveVisualVertical up = (%d,%d), want (0,0)", e.y, e.x)
+	}
+}
+
 func TestModifiedRuneDoesNotReplaceSelection(t *testing.T) {
 	for _, mod := range []tcell.ModMask{tcell.ModAlt, tcell.ModMeta, tcell.ModHyper} {
 		e := &editor{

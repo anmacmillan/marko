@@ -457,7 +457,7 @@ func (e *editor) movePageVisual(delta int) {
 		return
 	}
 	current := e.cursorVisualRow(rows)
-	target := max(0, min(len(rows)-1, current+delta*max(1, bodyH-1)))
+	target := e.nextVisualRowIndex(rows, current, delta*max(1, bodyH-1))
 	column := e.x - rows[current].start
 	if column < 0 {
 		column = 0
@@ -1806,7 +1806,7 @@ func (e *editor) moveVisualVertical(delta int) {
 		return
 	}
 	current := e.cursorVisualRow(rows)
-	target := max(0, min(len(rows)-1, current+delta))
+	target := e.nextVisualRowIndex(rows, current, delta)
 	if target == current {
 		return
 	}
@@ -1963,6 +1963,11 @@ func (e *editor) draw() {
 	e.top = min(max(e.top, 0), maxTop)
 	for row := 0; row < bodyH && e.top+row < len(rows); row++ {
 		vr := rows[e.top+row]
+		if vr.start < 0 {
+			style := e.focusStyle(tcell.StyleDefault.Background(e.theme.background), e.focusedLine(vr.y))
+			e.put(left, row, strings.Repeat(" ", contentWidth), style, left+contentWidth)
+			continue
+		}
 		e.drawVisualLine(left, row, vr, e.focusedLine(vr.y), contentWidth)
 	}
 	name := filepath.Base(e.path)
@@ -2245,6 +2250,17 @@ func (e *editor) visualRows(width int) []visualRow {
 	rows := []visualRow{}
 	for y := 0; y < len(e.lines); y++ {
 		line := e.lines[y]
+		if level, _, ok := heading(line); ok {
+			before, after := headingSpacing(level)
+			for i := 0; i < before; i++ {
+				rows = appendSpacerRow(rows, y)
+			}
+			rows = e.appendVisualLineRows(rows, y, line, width)
+			for i := 0; i < after; i++ {
+				rows = appendSpacerRow(rows, y)
+			}
+			continue
+		}
 		if chart, end, ok := e.zopaBlock(y); ok && (e.y < y || e.y > end) {
 			for i, text := range renderZOPA(chart, width) {
 				rows = append(rows, visualRow{y: y, start: i, text: text})
@@ -2272,31 +2288,87 @@ func (e *editor) visualRows(width int) []visualRow {
 			rows = append(rows, visualRow{y: y, text: e.renderTableLine(y, width)})
 			continue
 		}
-		if y != e.y {
-			if quote, ok := blockQuote(line); ok {
-				line = "│ " + quote
-			}
-		}
-		runes := []rune(line)
-		if len(runes) == 0 {
-			rows = append(rows, visualRow{y: y})
-			continue
-		}
-		for start := 0; start < len(runes); {
-			end := min(len(runes), start+width)
-			if end < len(runes) {
-				for candidate := end; candidate > start+width/2; candidate-- {
-					if runes[candidate-1] == ' ' {
-						end = candidate
-						break
-					}
-				}
-			}
-			rows = append(rows, visualRow{y: y, start: start, text: string(runes[start:end])})
-			start = end
-		}
+		rows = e.appendVisualLineRows(rows, y, line, width)
 	}
 	return rows
+}
+
+func (e *editor) appendVisualLineRows(rows []visualRow, y int, line string, width int) []visualRow {
+	if y != e.y {
+		if quote, ok := blockQuote(line); ok {
+			line = "│ " + quote
+		}
+	}
+	runes := []rune(line)
+	if len(runes) == 0 {
+		return append(rows, visualRow{y: y})
+	}
+	for start := 0; start < len(runes); {
+		end := min(len(runes), start+width)
+		if end < len(runes) {
+			for candidate := end; candidate > start+width/2; candidate-- {
+				if runes[candidate-1] == ' ' {
+					end = candidate
+					break
+				}
+			}
+		}
+		rows = append(rows, visualRow{y: y, start: start, text: string(runes[start:end])})
+		start = end
+	}
+	return rows
+}
+
+func headingSpacing(level int) (int, int) {
+	switch level {
+	case 1:
+		return 1, 1
+	case 2:
+		return 1, 0
+	default:
+		return 0, 0
+	}
+}
+
+func appendSpacerRow(rows []visualRow, y int) []visualRow {
+	if len(rows) > 0 && rows[len(rows)-1].start < 0 {
+		return rows
+	}
+	return append(rows, visualRow{y: y, start: -1})
+}
+
+func (e *editor) nextVisualRowIndex(rows []visualRow, current, delta int) int {
+	if len(rows) == 0 || delta == 0 {
+		return current
+	}
+	target := current
+	step := 1
+	if delta < 0 {
+		step = -1
+		delta = -delta
+	}
+	for delta > 0 {
+		target += step
+		if target < 0 {
+			return 0
+		}
+		if target >= len(rows) {
+			return len(rows) - 1
+		}
+		if rows[target].start >= 0 {
+			delta--
+		}
+	}
+	for target >= 0 && target < len(rows) && rows[target].start < 0 {
+		target += step
+	}
+	if target < 0 {
+		return 0
+	}
+	if target >= len(rows) {
+		return len(rows) - 1
+	}
+	return target
 }
 
 func (e *editor) codeFence(start int) (string, int, bool) {
@@ -2598,6 +2670,9 @@ func (e *editor) stats() string {
 
 func (e *editor) cursorVisualRow(rows []visualRow) int {
 	for i := len(rows) - 1; i >= 0; i-- {
+		if rows[i].start < 0 {
+			continue
+		}
 		if rows[i].y == e.y && rows[i].start <= e.x {
 			return i
 		}
