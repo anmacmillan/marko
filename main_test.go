@@ -1314,7 +1314,7 @@ func TestExternalChange(t *testing.T) {
 	}
 }
 
-func TestLoadRecentKeepsMissingAndLimitsFive(t *testing.T) {
+func TestLoadRecentFiltersMissingAndLimitsFive(t *testing.T) {
 	oldConfig := os.Getenv("XDG_CONFIG_HOME")
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
@@ -1337,7 +1337,7 @@ func TestLoadRecentKeepsMissingAndLimitsFive(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := loadRecent()
-	if len(got) != 5 || got[0] != paths[0] || got[1] != paths[1] {
+	if len(got) != 5 || got[0] != paths[1] || got[1] != paths[2] {
 		t.Fatalf("loadRecent() = %#v", got)
 	}
 }
@@ -2093,41 +2093,6 @@ func TestRecentPanelGroupsByAge(t *testing.T) {
 	}
 	if strings.Index(text, "Past 48 hours") > strings.Index(text, "Past week") || strings.Index(text, "Past week") > strings.Index(text, "Older") {
 		t.Fatalf("recent groups out of order:\n%s", text)
-	}
-}
-
-func TestRecentPanelShowsMissingFilesSection(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
-	t.Setenv("HOME", dir)
-	missing := "missing.md"
-	if err := os.MkdirAll(filepath.Dir(recentConfigPath()), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(recentConfigPath(), []byte(missing+"\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	screen := tcell.NewSimulationScreen("UTF-8")
-	if err := screen.Init(); err != nil {
-		t.Fatal(err)
-	}
-	defer screen.Fini()
-	screen.SetSize(100, 16)
-	e := &editor{
-		screen:     screen,
-		lines:      []string{"x"},
-		theme:      themeByName("calm"),
-		showRecent: true,
-	}
-	e.draw()
-	var rendered strings.Builder
-	for row := 0; row < 16; row++ {
-		rendered.WriteString(simulationLine(screen, row, 100))
-		rendered.WriteByte('\n')
-	}
-	text := rendered.String()
-	if !strings.Contains(text, "Missing files") || !strings.Contains(text, "missing.md (missing)") {
-		t.Fatalf("recent panel did not surface missing history:\n%s", text)
 	}
 }
 

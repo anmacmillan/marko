@@ -246,7 +246,9 @@ func loadRecent() []string {
 	var recent []string
 	for _, path := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 		if path != "" {
-			recent = append(recent, path)
+			if _, err := os.Stat(path); err == nil {
+				recent = append(recent, path)
+			}
 		}
 		if len(recent) == 5 {
 			break
@@ -2321,12 +2323,8 @@ func (e *editor) recentPanelLines(sections []recentFileSection, width int) ([]re
 			if entry.rank == e.recentIndex {
 				prefix = "> "
 			}
-			label := entry.path + " (missing)"
-			if !entry.modTime.IsZero() {
-				label = recentDisplayLabel(entry.path, width)
-			}
 			lines = append(lines, recentPanelLine{
-				text: prefix + label,
+				text: prefix + recentDisplayLabel(entry.path, width),
 				kind: recentLineEntry,
 				rank: entry.rank,
 			})
@@ -2372,15 +2370,12 @@ func groupedRecentFiles(paths []string) []recentFileSection {
 		{title: "Past 48 hours"},
 		{title: "Past week"},
 		{title: "Older"},
-		{title: "Missing files"},
 	}
 	rank := 0
 	now := time.Now()
 	for _, path := range paths {
 		info, err := os.Stat(path)
 		if err != nil {
-			sections[3].entries = append(sections[3].entries, recentFileItem{path: path, rank: rank})
-			rank++
 			continue
 		}
 		item := recentFileItem{path: path, modTime: info.ModTime(), rank: rank}
