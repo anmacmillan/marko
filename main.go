@@ -1901,7 +1901,7 @@ func (e *editor) draw() {
 	left, contentWidth := writingArea(w)
 	background := tcell.StyleDefault.Background(e.theme.background)
 	for row := 0; row < bodyH; row++ {
-		e.put(left, row, strings.Repeat(" ", contentWidth), background, w)
+		e.put(0, row, strings.Repeat(" ", w), background, w)
 	}
 	rows := e.visualRows(contentWidth)
 	cursorRow := e.cursorVisualRow(rows)

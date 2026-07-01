@@ -991,6 +991,28 @@ func TestCtrlCCopyDoesNotMutateSelection(t *testing.T) {
 	}
 }
 
+func TestDrawFillsFullTerminalWithThemeBackground(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(120, 8)
+	e := &editor{
+		screen: screen,
+		lines:  []string{"paper"},
+		theme:  themeByName("paper"),
+	}
+	e.draw()
+	for _, x := range []int{0, 119} {
+		_, _, style, _ := screen.GetContent(x, 0)
+		_, bg, _ := style.Decompose()
+		if bg != e.theme.background {
+			t.Fatalf("background at x=%d = %v, want %v", x, bg, e.theme.background)
+		}
+	}
+}
+
 func TestSelectedBlankLineIsHighlighted(t *testing.T) {
 	screen := tcell.NewSimulationScreen("UTF-8")
 	if err := screen.Init(); err != nil {
