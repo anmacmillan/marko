@@ -2176,9 +2176,6 @@ func (e *editor) draw() {
 		if e.showHelp {
 			e.drawHelp(w, h)
 		}
-		if e.showCoach && !e.showHelp {
-			e.drawCoach(w, h)
-		}
 		e.screen.Show()
 		return
 	}
@@ -2404,12 +2401,11 @@ func (e *editor) drawHelp(w, h int) {
 }
 
 func (e *editor) drawCoach(w, h int) {
-	lines := []string{
-		" MARKO ",
+	lines := append(markoWordmark(w-8), []string{
 		"Markdown focus",
 		"F2 save as   F3 recent   F5/F6/F7 headings",
 		"F1 more   Esc dismiss",
-	}
+	}...)
 	width := 0
 	for _, line := range lines {
 		width = max(width, runeLen(line))
@@ -2430,11 +2426,10 @@ func (e *editor) drawStartMenu(w, h int) {
 	for row := 0; row < h; row++ {
 		e.put(0, row, strings.Repeat(" ", w), bg, w)
 	}
-	lines := []string{
-		" MARKO ",
+	lines := append(markoWordmark(w-8), []string{
 		"Markdown focus",
 		"",
-	}
+	}...)
 	items := e.startMenuItems()
 	if e.startMenuIndex < 0 || e.startMenuIndex >= len(items) {
 		e.startMenuIndex = 0
@@ -2478,6 +2473,25 @@ func (e *editor) drawStartMenu(w, h int) {
 		e.put(x+2, y+1+row, line, style, min(w, x+2+width))
 	}
 	e.screen.HideCursor()
+}
+
+func markoWordmark(maxWidth int) []string {
+	art := []string{
+		"                      __          ",
+		"  _____ _____ _______|  | ______  ",
+		" /     \\\\__  \\\\_  __ \\  |/ /  _ \\ ",
+		"|  Y Y  \\/ __ \\|  | \\/    <  <_> )",
+		"|__|_|  (____  /__|  |__|_ \\____/ ",
+		"      \\/     \\/           \\/      ",
+	}
+	width := 0
+	for _, line := range art {
+		width = max(width, runeLen(line))
+	}
+	if maxWidth >= width {
+		return art
+	}
+	return []string{"MARKO"}
 }
 
 func (e *editor) drawRecent(w, h int) {

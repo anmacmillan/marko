@@ -1794,7 +1794,7 @@ func TestShortcutCoachRendersStartupHint(t *testing.T) {
 		rendered.WriteByte('\n')
 	}
 	text := rendered.String()
-	for _, want := range []string{"MARKO", "F2 save as", "F3 recent", "F5/F6/F7 headings", "F1 more"} {
+	for _, want := range []string{"_____|  | ______", "<  <_> )", "F2 save as", "F3 recent", "F5/F6/F7 headings", "F1 more"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("shortcut coach did not render %q:\n%s", want, text)
 		}
@@ -1823,7 +1823,7 @@ func TestShortcutCoachRendersMarkoTextArt(t *testing.T) {
 		rendered.WriteByte('\n')
 	}
 	text := rendered.String()
-	for _, want := range []string{"MARKO", "Markdown focus", "F2 save as", "F3 recent"} {
+	for _, want := range []string{"_____|  | ______", "<  <_> )", "\\/     \\/", "Markdown focus", "F2 save as", "F3 recent"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("shortcut coach did not render %q:\n%s", want, text)
 		}
@@ -1861,7 +1861,7 @@ func TestStartMenuCanRenderStartupCoach(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer screen.Fini()
-	screen.SetSize(80, 18)
+	screen.SetSize(80, 20)
 	e := &editor{
 		screen:        screen,
 		lines:         []string{""},
@@ -1871,12 +1871,12 @@ func TestStartMenuCanRenderStartupCoach(t *testing.T) {
 	}
 	e.draw()
 	var rendered strings.Builder
-	for row := 0; row < 18; row++ {
+	for row := 0; row < 20; row++ {
 		rendered.WriteString(simulationLine(screen, row, 80))
 		rendered.WriteByte('\n')
 	}
 	text := rendered.String()
-	for _, want := range []string{"MARKO", "F2 save as", "New document", "Open path"} {
+	for _, want := range []string{"_____|  | ______", "<  <_> )", "New document", "Open path"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("startup coach/start menu did not render %q:\n%s", want, text)
 		}
@@ -1889,7 +1889,7 @@ func TestStartMenuRendersNewRecentAndOpenPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer screen.Fini()
-	screen.SetSize(80, 18)
+	screen.SetSize(80, 20)
 	e := &editor{
 		screen:        screen,
 		lines:         []string{""},
@@ -1899,12 +1899,12 @@ func TestStartMenuRendersNewRecentAndOpenPath(t *testing.T) {
 	}
 	e.draw()
 	var rendered strings.Builder
-	for row := 0; row < 18; row++ {
+	for row := 0; row < 20; row++ {
 		rendered.WriteString(simulationLine(screen, row, 80))
 		rendered.WriteByte('\n')
 	}
 	text := rendered.String()
-	for _, want := range []string{"MARKO", "New document", "/tmp/one.md", "Open path", "F1 help"} {
+	for _, want := range []string{"_____|  | ______", "New document", "/tmp/one.md", "Open path", "F1 help"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("start menu did not render %q:\n%s", want, text)
 		}
