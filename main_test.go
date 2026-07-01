@@ -732,6 +732,20 @@ func TestSavePromptAddsMarkdownExtension(t *testing.T) {
 	_ = os.Remove("note.md")
 }
 
+func TestSavePromptExpandsHomeDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	e := &editor{lines: []string{"hello"}, prompt: "Save as: ", promptValue: "~/drafts/note"}
+	e.promptKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	want := filepath.Join(home, "drafts", "note.md")
+	if e.path != want {
+		t.Fatalf("path = %q, want %q", e.path, want)
+	}
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("saved file missing: %v", err)
+	}
+}
+
 func TestDatedUntitledPath(t *testing.T) {
 	now := time.Date(2026, 12, 30, 9, 0, 0, 0, time.UTC)
 	if got, want := datedUntitledPath(now), "20261230_untitled.md"; got != want {
@@ -974,6 +988,28 @@ func TestMouseDragSelectsAcrossParagraphs(t *testing.T) {
 	e.mouse(tcell.NewEventMouse(left+5, 4, tcell.ButtonNone, tcell.ModNone))
 	if got, want := e.selectionText(), "one\n\ntwo\n\nthree"; got != want {
 		t.Fatalf("mouse multi-paragraph selection = %q, want %q", got, want)
+	}
+}
+
+func TestMouseDragSelectsRenderedInlineMarkdownText(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(80, 5)
+	e := &editor{
+		screen: screen,
+		lines:  []string{"Read **this** now"},
+		theme:  themeByName("calm"),
+	}
+	left, _ := writingArea(80)
+	e.draw()
+	e.mouse(tcell.NewEventMouse(left+5, 0, tcell.Button1, tcell.ModNone))
+	e.mouse(tcell.NewEventMouse(left+9, 0, tcell.Button1, tcell.ModNone))
+	e.mouse(tcell.NewEventMouse(left+9, 0, tcell.ButtonNone, tcell.ModNone))
+	if got, want := e.selectionText(), "this"; got != want {
+		t.Fatalf("mouse inline markdown selection = %q, want %q", got, want)
 	}
 }
 
@@ -1244,9 +1280,9 @@ func TestSaveProtectsExternalChanges(t *testing.T) {
 
 func TestToggleEmphasisBoldWrapsSelection(t *testing.T) {
 	e := &editor{
-		lines:     []string{"hello world"},
-		x:         5, y: 0,
-		selX:      0, selY: 0,
+		lines: []string{"hello world"},
+		x:     5, y: 0,
+		selX: 0, selY: 0,
 		selecting: true,
 	}
 	e.toggleEmphasis("**", "**")
@@ -1260,9 +1296,9 @@ func TestToggleEmphasisBoldWrapsSelection(t *testing.T) {
 
 func TestToggleEmphasisBoldUnwraps(t *testing.T) {
 	e := &editor{
-		lines:     []string{"**hello** world"},
-		x:         7, y: 0,
-		selX:      2, selY: 0,
+		lines: []string{"**hello** world"},
+		x:     7, y: 0,
+		selX: 2, selY: 0,
 		selecting: true,
 	}
 	e.toggleEmphasis("**", "**")
@@ -1276,9 +1312,9 @@ func TestToggleEmphasisBoldUnwraps(t *testing.T) {
 
 func TestToggleEmphasisUnderlineWrapUnwrap(t *testing.T) {
 	e := &editor{
-		lines:     []string{"a note here"},
-		x:         6, y: 0,
-		selX:      2, selY: 0,
+		lines: []string{"a note here"},
+		x:     6, y: 0,
+		selX: 2, selY: 0,
 		selecting: true,
 	}
 	e.toggleEmphasis("<u>", "</u>")
@@ -1295,9 +1331,9 @@ func TestToggleEmphasisUnderlineWrapUnwrap(t *testing.T) {
 
 func TestToggleEmphasisHighlightWrapUnwrap(t *testing.T) {
 	e := &editor{
-		lines:     []string{"key point"},
-		x:         9, y: 0,
-		selX:      4, selY: 0,
+		lines: []string{"key point"},
+		x:     9, y: 0,
+		selX: 4, selY: 0,
 		selecting: true,
 	}
 	e.toggleEmphasis("==", "==")
@@ -1325,9 +1361,9 @@ func TestToggleEmphasisNoSelectionInsertsMarkers(t *testing.T) {
 
 func TestCtrlBBoldKeybind(t *testing.T) {
 	e := &editor{
-		lines:     []string{"plain"},
-		x:         5, y: 0,
-		selX:      0, selY: 0,
+		lines: []string{"plain"},
+		x:     5, y: 0,
+		selX: 0, selY: 0,
 		selecting: true,
 	}
 	e.key(tcell.NewEventKey(tcell.KeyCtrlB, 0, tcell.ModCtrl))
@@ -1338,9 +1374,9 @@ func TestCtrlBBoldKeybind(t *testing.T) {
 
 func TestCtrlHHighlightKeybind(t *testing.T) {
 	e := &editor{
-		lines:     []string{"plain"},
-		x:         5, y: 0,
-		selX:      0, selY: 0,
+		lines: []string{"plain"},
+		x:     5, y: 0,
+		selX: 0, selY: 0,
 		selecting: true,
 	}
 	e.key(tcell.NewEventKey(tcell.KeyCtrlH, 0, tcell.ModCtrl))
@@ -1352,9 +1388,9 @@ func TestCtrlHHighlightKeybind(t *testing.T) {
 func TestCtrlEItalicKeybindAndRecentOnShift(t *testing.T) {
 	// Plain Ctrl-E toggles italic.
 	e := &editor{
-		lines:     []string{"plain"},
-		x:         5, y: 0,
-		selX:      0, selY: 0,
+		lines: []string{"plain"},
+		x:     5, y: 0,
+		selX: 0, selY: 0,
 		selecting: true,
 	}
 	e.key(tcell.NewEventKey(tcell.KeyCtrlE, 0, tcell.ModCtrl))
@@ -1374,9 +1410,9 @@ func TestCtrlEItalicKeybindAndRecentOnShift(t *testing.T) {
 
 func TestCtrlUUnderlineKeybind(t *testing.T) {
 	e := &editor{
-		lines:     []string{"plain"},
-		x:         5, y: 0,
-		selX:      0, selY: 0,
+		lines: []string{"plain"},
+		x:     5, y: 0,
+		selX: 0, selY: 0,
 		selecting: true,
 	}
 	e.key(tcell.NewEventKey(tcell.KeyCtrlU, 0, tcell.ModCtrl))
@@ -1400,6 +1436,88 @@ func TestCtrlASelectAll(t *testing.T) {
 	_, _, bx, by, ok := e.selectionBounds()
 	if !ok || by != 2 || bx != 5 {
 		t.Fatalf("Ctrl-A selection bounds = (%d,%d) ok=%t, want (5,2)", bx, by, ok)
+	}
+}
+
+func TestF2OpensSaveAsPrompt(t *testing.T) {
+	e := &editor{lines: []string{"x"}, path: "named.md", untitled: false}
+	e.key(tcell.NewEventKey(tcell.KeyF2, 0, tcell.ModNone))
+	if e.prompt != "Save as: " {
+		t.Fatalf("F2 prompt = %q, want Save as: ", e.prompt)
+	}
+	if e.promptValue != "named.md" {
+		t.Fatalf("F2 promptValue = %q, want named.md", e.promptValue)
+	}
+}
+
+func TestHelpRendersAlignedShortcutColumns(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(100, 20)
+	e := &editor{screen: screen, lines: []string{""}, theme: themeByName("calm")}
+	e.drawHelp(100, 20)
+	var rendered strings.Builder
+	for row := 0; row < 20; row++ {
+		rendered.WriteString(simulationLine(screen, row, 100))
+		rendered.WriteByte('\n')
+	}
+	text := rendered.String()
+	for _, want := range []string{"F2", "Save As", "Ctrl-Shift-S", "Select all"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("help did not render %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "Ctrl-B bold   Ctrl-E italic") {
+		t.Fatalf("help still rendered dense unaligned shortcut block:\n%s", text)
+	}
+}
+
+func TestShortcutCoachRendersStartupHint(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(72, 12)
+	e := &editor{
+		screen:    screen,
+		path:      "note.md",
+		lines:     []string{"hello"},
+		theme:     themeByName("calm"),
+		showCoach: true,
+		status:    "ready",
+	}
+	e.draw()
+	var rendered strings.Builder
+	for row := 0; row < 12; row++ {
+		rendered.WriteString(simulationLine(screen, row, 72))
+		rendered.WriteByte('\n')
+	}
+	text := rendered.String()
+	for _, want := range []string{"Marko shortcuts", "Ctrl-A select all", "Ctrl-C copy", "Ctrl-H highlight", "F1 more"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("shortcut coach did not render %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestShortcutCoachDismissesOnKeyAndF1OpensHelp(t *testing.T) {
+	e := &editor{lines: []string{""}, theme: themeByName("calm"), showCoach: true}
+	e.key(tcell.NewEventKey(tcell.KeyRune, 'x', 0))
+	if e.showCoach {
+		t.Fatal("shortcut coach stayed visible after text input")
+	}
+
+	e.showCoach = true
+	e.key(tcell.NewEventKey(tcell.KeyF1, 0, 0))
+	if e.showCoach {
+		t.Fatal("shortcut coach stayed visible after F1")
+	}
+	if !e.showHelp {
+		t.Fatal("F1 did not open full help")
 	}
 }
 

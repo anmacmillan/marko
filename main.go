@@ -45,6 +45,7 @@ type editor struct {
 	modTime         time.Time
 	conflict        bool
 	showHelp        bool
+	showCoach       bool
 	showRecent      bool
 	recent          []string
 	recentIndex     int
@@ -124,9 +125,9 @@ func newEditor(path string, untitled bool) (*editor, error) {
 	}
 	s.EnableMouse()
 	s.EnablePaste()
-	status := "Ctrl-B bold · Ctrl-E italic · Ctrl-U underline · Ctrl-S save · Ctrl-Q quit"
+	status := "F1 shortcuts · Ctrl-A select all · Ctrl-C copy · Ctrl-H highlight · Ctrl-S save"
 	themeName := selectedThemeName()
-	e := &editor{screen: s, path: path, untitled: untitled, lines: lines, status: status, themeName: themeName, theme: themeByName(themeName), lastAction: time.Now(), modTime: modTime}
+	e := &editor{screen: s, path: path, untitled: untitled, lines: lines, status: status, themeName: themeName, theme: themeByName(themeName), lastAction: time.Now(), modTime: modTime, showCoach: true}
 	e.rememberRecent(path)
 	return e, nil
 }
@@ -331,7 +332,7 @@ func (e *editor) mouse(ev *tcell.EventMouse) {
 
 	index := min(len(rows)-1, max(0, e.top+targetSy))
 	y := rows[index].y
-	x = min(runeLen(e.lines[y]), max(0, rows[index].start+x-left))
+	x = e.sourceColumnForMouse(rows[index], x-left)
 	if buttons&tcell.Button1 != 0 {
 		if !e.mouseDown {
 			if time.Since(e.lastClick) < 400*time.Millisecond && e.clickX == x && e.clickY == y {
@@ -359,6 +360,12 @@ func (e *editor) mouse(ev *tcell.EventMouse) {
 	} else {
 		e.mouseDown = false
 	}
+}
+
+func (e *editor) sourceColumnForMouse(vr visualRow, displayColumn int) int {
+	displayColumn = max(0, displayColumn)
+	line := e.lines[vr.y]
+	return sourceColumnForRenderedColumn(line, vr.start, displayColumn)
 }
 
 func (e *editor) scrollBy(delta, bodyH, rowCount int) {
@@ -504,6 +511,12 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		e.promptKey(ev)
 		return false
 	}
+	if e.showCoach {
+		e.showCoach = false
+		if ev.Key() == tcell.KeyEsc {
+			return false
+		}
+	}
 	switch eventKey(ev) {
 	case tcell.KeyCtrlQ:
 		if e.dirty && !e.confirmQuit {
@@ -514,15 +527,12 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		return true
 	case tcell.KeyCtrlS:
 		if ev.Modifiers()&tcell.ModShift != 0 || e.untitled || e.path == "" {
-			e.prompt = "Save as: "
-			if e.untitled || e.path == "" {
-				e.promptValue = "untitled.md"
-			} else {
-				e.promptValue = e.path
-			}
+			e.openSaveAsPrompt()
 		} else {
 			e.save()
 		}
+	case tcell.KeyF2:
+		e.openSaveAsPrompt()
 	case tcell.KeyCtrlG:
 		e.cycleTheme()
 	case tcell.KeyCtrlL:
@@ -766,7 +776,7 @@ func (e *editor) promptKey(ev *tcell.EventKey) {
 		if filepath.Ext(path) == "" {
 			path += ".md"
 		}
-		e.path = path
+		e.path = expandUserPath(path)
 		e.untitled = false
 		e.conflict = false
 		e.modTime = time.Time{}
@@ -793,6 +803,29 @@ func (e *editor) promptKey(ev *tcell.EventKey) {
 			e.findFromStart()
 		}
 	}
+}
+
+func (e *editor) openSaveAsPrompt() {
+	e.prompt = "Save as: "
+	if e.untitled || e.path == "" {
+		e.promptValue = "untitled.md"
+	} else {
+		e.promptValue = e.path
+	}
+}
+
+func expandUserPath(path string) string {
+	if path == "~" {
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			return home
+		}
+	}
+	if strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			return filepath.Join(home, path[2:])
+		}
+	}
+	return path
 }
 
 func (e *editor) checkpoint() {
@@ -1299,7 +1332,7 @@ func (e *editor) toggleEmphasisSingleLine(y, ax, bx int, open, close string) {
 		newRunes = append(newRunes, runes[bx+len(closeRunes):]...)
 		e.lines[y] = string(newRunes)
 		e.dirty = true
-		e.selX, e.selY = ax - len(openRunes), y
+		e.selX, e.selY = ax-len(openRunes), y
 		e.x, e.y = bx-len(openRunes), y
 		e.selecting = true
 		e.status = "Removed " + emphasisLabel(open, close)
@@ -1664,6 +1697,9 @@ func (e *editor) draw() {
 	if e.showRecent {
 		e.drawRecent(w, h)
 	}
+	if e.showCoach && !e.showHelp && !e.showRecent && e.prompt == "" {
+		e.drawCoach(w, h)
+	}
 	if e.prompt != "" {
 		e.screen.ShowCursor(1+runeLen(e.prompt)+runeLen(e.promptValue), h-1)
 	} else {
@@ -1777,18 +1813,53 @@ func (e *editor) focusedLine(y int) bool {
 func (e *editor) drawHelp(w, h int) {
 	lines := []string{
 		" Marko help ",
-		"F1 close   Ctrl-S save   Ctrl-Shift-S save as   Ctrl-Q quit",
-		"Ctrl-B bold   Ctrl-E italic   Ctrl-U underline   Ctrl-H highlight",
-		"Ctrl-A select all   Ctrl-Space checkbox   Ctrl-O link   Ctrl-T table",
-		"Ctrl-F find   Ctrl-N/P next/previous   Ctrl-R replace",
-		"Ctrl-Z/Y undo/redo   Ctrl-C/X/V clipboard   Ctrl-K focus",
-		"Ctrl-Shift-E recent files   Ctrl-G theme   Shift-arrows or drag select",
+		"Key              Action",
+		"F1               Close help",
+		"Ctrl-S           Save",
+		"F2 / Ctrl-Shift-S Save As",
+		"Ctrl-Q           Quit",
+		"Ctrl-A           Select all",
+		"Shift-arrows     Select text",
+		"Drag             Select text",
+		"Ctrl-C/X/V       Copy / cut / paste",
+		"Ctrl-B/E/U/H     Bold / italic / underline / highlight",
+		"Ctrl-Space       Toggle checkbox",
+		"Ctrl-O           Link selection",
+		"Ctrl-T           Create table",
+		"Ctrl-F/N/P       Find / next / previous",
+		"Ctrl-R           Replace",
+		"Ctrl-Shift-R     Rename file",
+		"Ctrl-Z/Y         Undo / redo",
+		"Ctrl-K           Focus mode",
+		"Ctrl-Shift-E     Recent files",
+		"Ctrl-G           Cycle theme",
 	}
 	width := 0
 	for _, line := range lines {
 		width = max(width, runeLen(line))
 	}
 	x, y := max(0, (w-width-4)/2), max(0, (h-len(lines)-2)/2)
+	box := tcell.StyleDefault.Background(e.theme.statusBG).Foreground(e.theme.statusFG)
+	for row := 0; row < len(lines)+2 && y+row < h; row++ {
+		e.put(x, y+row, strings.Repeat(" ", min(w-x, width+4)), box, w)
+	}
+	for row, line := range lines {
+		e.put(x+2, y+1+row, line, box, w)
+	}
+}
+
+func (e *editor) drawCoach(w, h int) {
+	lines := []string{
+		" Marko shortcuts ",
+		"Ctrl-A select all   Ctrl-C copy   Ctrl-H highlight",
+		"F1 more   Esc dismiss",
+	}
+	width := 0
+	for _, line := range lines {
+		width = max(width, runeLen(line))
+	}
+	x := max(0, (w-width-4)/2)
+	y := max(0, h-len(lines)-4)
 	box := tcell.StyleDefault.Background(e.theme.statusBG).Foreground(e.theme.statusFG)
 	for row := 0; row < len(lines)+2 && y+row < h; row++ {
 		e.put(x, y+row, strings.Repeat(" ", min(w-x, width+4)), box, w)
@@ -2622,6 +2693,55 @@ func inlinePlainText(value string) string {
 	return string(plain)
 }
 
+func sourceColumnForRenderedColumn(line string, start, renderedColumn int) int {
+	runes := []rune(line)
+	if start < 0 {
+		start = 0
+	}
+	if start > len(runes) {
+		start = len(runes)
+	}
+	renderedColumn = max(0, renderedColumn)
+	sourceAtBoundary := start
+	displayed := 0
+	for i := start; i < len(runes); {
+		if runes[i] == '`' {
+			if end := closingRune(runes, i+1, '`'); end > i+1 {
+				sourceAtBoundary = max(sourceAtBoundary, i+1)
+				for idx := i + 1; idx < end; idx++ {
+					if displayed == renderedColumn {
+						return sourceAtBoundary
+					}
+					displayed++
+					sourceAtBoundary = idx + 1
+				}
+				i = end + 1
+				continue
+			}
+		}
+		openLen, closeLen, _, end := emphasisAt(runes, i)
+		if openLen > 0 {
+			sourceAtBoundary = max(sourceAtBoundary, i+openLen)
+			for idx := i + openLen; idx < end; idx++ {
+				if displayed == renderedColumn {
+					return sourceAtBoundary
+				}
+				displayed++
+				sourceAtBoundary = idx + 1
+			}
+			i = end + closeLen
+			continue
+		}
+		if displayed == renderedColumn {
+			return sourceAtBoundary
+		}
+		displayed++
+		sourceAtBoundary = i + 1
+		i++
+	}
+	return sourceAtBoundary
+}
+
 func (e *editor) put(x, y int, text string, style tcell.Style, maxWidth int) {
 	for _, r := range text {
 		if x >= maxWidth {
@@ -2783,7 +2903,9 @@ func emphasisAt(runes []rune, start int) (int, int, func(tcell.Style) tcell.Styl
 		{"**", func(s tcell.Style) tcell.Style { return s.Bold(true) }},
 		{"__", func(s tcell.Style) tcell.Style { return s.Bold(true) }},
 		{"~~", func(s tcell.Style) tcell.Style { return s.StrikeThrough(true) }},
-		{"==", func(s tcell.Style) tcell.Style { return s.Background(tcell.ColorGoldenrod).Foreground(tcell.ColorBlack) }},
+		{"==", func(s tcell.Style) tcell.Style {
+			return s.Background(tcell.ColorGoldenrod).Foreground(tcell.ColorBlack)
+		}},
 		{"*", func(s tcell.Style) tcell.Style { return s.Italic(true) }},
 		{"_", func(s tcell.Style) tcell.Style { return s.Italic(true) }},
 	}
