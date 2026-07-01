@@ -19,7 +19,7 @@ The screenshot shows both states: a rendered table in the editor and the raw Mar
 Terminal Markdown tools often force a compromise: a raw plain-text editor, a separate read-only viewer, or a powerful modal editor with a steep learning curve. Marko bridges the gap. It is built for writers who love terminal efficiency but want a calm, visually polished environment that respects the layout of their document.
 
 - **Write in Place**: Read dynamically rendered headings, emphasis, list markers, and beautifully aligned tables directly in the editor buffer. Step into them to edit their raw Markdown syntax.
-- **True Focus Mode**: Highlight the current active paragraph, table, list item, or code block while smoothly dimming the surrounding context (Vim Goyo-style).
+- **True Focus Mode**: Highlight the current active paragraph, table, list item, or code block while smoothly dimming the surrounding context with theme-aware Goyo/Limelight-style backgrounds.
 - **Auto-Sync & Live Reload**: Perfect for hybrid workflows. Marko automatically detects external file changes (like edits made by AI tools or external scripts) and live-reloads your document instantly while preserving your precise scroll position and cursor location.
 - **Natural Visual Navigation**: Arrow keys navigate visually on wrapped prose lines rather than physical source lines, matching the intuitive feel of GUI editors.
 - **Rich Terminal Integration**: Full support for trackpad/mouse-wheel scrolling, double-click word selection, triple-click line selection, cross-platform clipboard syncing (`Ctrl-C`/`Ctrl-V`), and bracketed paste protection.
@@ -38,11 +38,11 @@ Documents autosave after two idle seconds. Press `F1` inside Marko for the compl
 ### 💡 Dynamic Inline Markdown Rendering
 - **Aligned Tables**: Markdown tables instantly format into clean, boxed unicode tables. Pressing `Tab` moves through cells, `Enter` inserts new rows, and stepping out preserves the formatting.
 - **Fenced Code Blocks**: Raw code blocks fold into visually distinct boxes with calm language labels. Stepping inside reveals the code, and stepping out hides the syntax.
-- **Emphasis & Headers**: Headers are styled and clean, and bold, italic, underline, highlight, or strikethrough markdown markers disappear inline unless you are actively editing that line. Toggle them WYSIWYG-style with `Ctrl-B` (bold), `Ctrl-E` (italic), `Ctrl-U` (underline), and `Ctrl-H` (highlight) — they wrap or unwrap the selection, or insert empty markers when nothing is selected.
+- **Emphasis & Headers**: Headers are styled and clean, and bold, italic, underline, highlight, or strikethrough markdown markers disappear inline unless you are actively editing that line. Toggle inline formatting WYSIWYG-style with `Ctrl-B` (bold), `Ctrl-E` (italic), `Ctrl-U` (underline), and `Ctrl-H` (highlight); use `F5`, `F6`, and `F7` to toggle H1, H2, and H3 on the current line.
 - **Interactive Checkboxes**: Toggle lists and markdown checkboxes `[ ]` / `[x]` instantly using `Ctrl-Space`.
 
 ### 🎯 Intelligent Focus Mode
-Focus mode (toggled persistently using `Ctrl-K`) doesn't just dim lines blindly. It parses Markdown structure:
+Focus mode (toggled persistently using `Ctrl-K`) doesn't just dim lines blindly. It parses Markdown structure and uses each theme's own focus and dim backgrounds:
 - If you're on a paragraph, it highlights the paragraph and dims everything else.
 - If you enter a table, the entire table remains beautifully lit.
 - If you write code, the entire code block stays visible.
@@ -62,7 +62,8 @@ Marko works perfectly alongside external automations, scripts, or AI assistants.
 | `Ctrl-B` | Bold (`**…**`) — wrap/unwrap selection, or insert empty markers |
 | `Ctrl-E` | Italic (`*…*`) — wrap/unwrap selection, or insert empty markers |
 | `Ctrl-U` | Underline (`<u>…</u>`) — wrap/unwrap selection, or insert empty markers |
-| `Ctrl-H` | Highlight (`==…==`, yellow) — wrap/unwrap selection, or insert empty markers |
+| `Ctrl-H` | Highlight (`==…==`, theme-colored) — wrap/unwrap selection, or insert empty markers |
+| `F5` / `F6` / `F7` | Toggle H1 / H2 / H3 on the current line |
 | `Ctrl-A` | Select all |
 | `F3` / `Ctrl-Shift-E` | Open recent Markdown file |
 | `Ctrl-F` / `Ctrl-N` / `Ctrl-P` | Search / next / previous |

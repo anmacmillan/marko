@@ -607,7 +607,7 @@ func TestEmphasisAt(t *testing.T) {
 		{"plain", 0, 0},
 	}
 	for _, test := range tests {
-		size, _, style, end := emphasisAt([]rune(test.text), 0)
+		size, _, _, style, end := emphasisAt([]rune(test.text), 0)
 		if size != test.markerSize || end != test.end {
 			t.Fatalf("emphasisAt(%q) = %d, %d; want %d, %d", test.text, size, end, test.markerSize, test.end)
 		}
@@ -683,6 +683,30 @@ func TestCurrentLineRendersInlineMarkdown(t *testing.T) {
 	_, _, attrs := style.Decompose()
 	if attrs&tcell.AttrBold == 0 {
 		t.Fatal("current bold marker did not apply bold style")
+	}
+}
+
+func TestHighlightUsesThemePalette(t *testing.T) {
+	for _, name := range []string{"matrix", "midnight", "paper", "ember"} {
+		t.Run(name, func(t *testing.T) {
+			screen := tcell.NewSimulationScreen("UTF-8")
+			if err := screen.Init(); err != nil {
+				t.Fatal(err)
+			}
+			defer screen.Fini()
+			screen.SetSize(40, 3)
+			e := &editor{
+				screen: screen,
+				lines:  []string{"==marked=="},
+				theme:  themeByName(name),
+			}
+			e.drawLine(0, 0, 0, e.lines[0], true, 40)
+			_, _, style, _ := screen.GetContent(0, 0)
+			fg, bg, _ := style.Decompose()
+			if fg != e.theme.highlightFG || bg != e.theme.highlightBG {
+				t.Fatalf("highlight style = fg %v bg %v, want fg %v bg %v", fg, bg, e.theme.highlightFG, e.theme.highlightBG)
+			}
+		})
 	}
 }
 
@@ -799,7 +823,7 @@ func TestNewPolishedThemesAreAvailable(t *testing.T) {
 			t.Fatalf("polished theme %q is not valid", name)
 		}
 		th := themeByName(name)
-		if th.text == tcell.ColorDefault || th.statusBG == tcell.ColorDefault || th.selectionBG == tcell.ColorDefault {
+		if th.text == tcell.ColorDefault || th.statusBG == tcell.ColorDefault || th.selectionBG == tcell.ColorDefault || th.focusBG == tcell.ColorDefault || th.dimBG == tcell.ColorDefault {
 			t.Fatalf("theme %q has incomplete palette: %#v", name, th)
 		}
 	}
@@ -820,6 +844,34 @@ func TestSearchUsesThemePalette(t *testing.T) {
 	_, bg, _ := style.Decompose()
 	if bg != e.theme.searchBG {
 		t.Fatalf("search background = %v, want %v", bg, e.theme.searchBG)
+	}
+}
+
+func TestFocusModeUsesFocusAndDimBackgrounds(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(80, 6)
+	e := &editor{
+		screen:    screen,
+		lines:     []string{"outside", "", "current one", "current two", "", "after"},
+		y:         2,
+		theme:     themeByName("midnight"),
+		focusMode: true,
+	}
+	e.draw()
+	left, _ := writingArea(80)
+	_, _, focusedStyle, _ := screen.GetContent(left, 2)
+	_, focusedBG, _ := focusedStyle.Decompose()
+	if focusedBG != e.theme.focusBG {
+		t.Fatalf("focused background = %v, want %v", focusedBG, e.theme.focusBG)
+	}
+	_, _, dimStyle, _ := screen.GetContent(left, 0)
+	_, dimBG, _ := dimStyle.Decompose()
+	if dimBG != e.theme.dimBG {
+		t.Fatalf("dim background = %v, want %v", dimBG, e.theme.dimBG)
 	}
 }
 
@@ -1489,6 +1541,37 @@ func TestCtrlUUnderlineKeybind(t *testing.T) {
 	}
 }
 
+func TestF5TogglesHeadingOne(t *testing.T) {
+	e := &editor{lines: []string{"Heading"}}
+	e.key(tcell.NewEventKey(tcell.KeyF5, 0, tcell.ModNone))
+	if got, want := e.lines[0], "# Heading"; got != want {
+		t.Fatalf("F5 heading: line = %q, want %q", got, want)
+	}
+	e.key(tcell.NewEventKey(tcell.KeyF5, 0, tcell.ModNone))
+	if got, want := e.lines[0], "Heading"; got != want {
+		t.Fatalf("F5 unheading: line = %q, want %q", got, want)
+	}
+}
+
+func TestF6ConvertsExistingHeadingToHeadingTwo(t *testing.T) {
+	e := &editor{lines: []string{"# Heading"}, x: 3}
+	e.key(tcell.NewEventKey(tcell.KeyF6, 0, tcell.ModNone))
+	if got, want := e.lines[0], "## Heading"; got != want {
+		t.Fatalf("F6 heading: line = %q, want %q", got, want)
+	}
+}
+
+func TestF7InsertsHeadingThreeOnBlankLine(t *testing.T) {
+	e := &editor{lines: []string{""}}
+	e.key(tcell.NewEventKey(tcell.KeyF7, 0, tcell.ModNone))
+	if got, want := e.lines[0], "### "; got != want {
+		t.Fatalf("F7 blank heading: line = %q, want %q", got, want)
+	}
+	if e.x != len("### ") {
+		t.Fatalf("F7 cursor = %d, want %d", e.x, len("### "))
+	}
+}
+
 func TestCtrlASelectAll(t *testing.T) {
 	e := &editor{lines: []string{"one", "two", "three"}, x: 1, y: 1}
 	e.key(tcell.NewEventKey(tcell.KeyCtrlA, 0, tcell.ModCtrl))
@@ -1541,7 +1624,7 @@ func TestHelpRendersAlignedShortcutColumns(t *testing.T) {
 		rendered.WriteByte('\n')
 	}
 	text := rendered.String()
-	for _, want := range []string{"F2", "Save As", "F3", "Recent files", "Ctrl-Shift-S", "Select all"} {
+	for _, want := range []string{"F2", "Save As", "F3", "Recent files", "F5", "Heading 1", "Ctrl-Shift-S", "Select all"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("help did not render %q:\n%s", want, text)
 		}
@@ -1573,7 +1656,7 @@ func TestShortcutCoachRendersStartupHint(t *testing.T) {
 		rendered.WriteByte('\n')
 	}
 	text := rendered.String()
-	for _, want := range []string{"MARKO", "F2 save as", "F3 recent", "Ctrl-A select all", "F1 more"} {
+	for _, want := range []string{"MARKO", "F2 save as", "F3 recent", "F5/F6/F7 headings", "F1 more"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("shortcut coach did not render %q:\n%s", want, text)
 		}

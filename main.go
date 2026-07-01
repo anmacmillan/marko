@@ -72,8 +72,9 @@ type zopaChart struct {
 }
 
 type theme struct {
-	text, heading1, heading2, heading3, table, quote, background, statusBG, statusFG, muted          tcell.Color
-	selectionBG, selectionFG, searchBG, searchFG, codeFG, codeBG, accent1, accent2, accent3, accent4 tcell.Color
+	text, heading1, heading2, heading3, table, quote, background, statusBG, statusFG, muted                tcell.Color
+	selectionBG, selectionFG, searchBG, searchFG, codeFG, codeBG, highlightBG, highlightFG, focusBG, dimBG tcell.Color
+	accent1, accent2, accent3, accent4                                                                     tcell.Color
 }
 
 var themeNames = []string{"calm", "matrix", "midnight", "paper", "ember", "green", "mono", "light", "ia-light", "ia-dark"}
@@ -129,7 +130,7 @@ func newEditor(path string, untitled bool) (*editor, error) {
 	}
 	s.EnableMouse()
 	s.EnablePaste()
-	status := "F1 shortcuts · Ctrl-A select all · Ctrl-C copy · Ctrl-H highlight · Ctrl-S save"
+	status := "F1 shortcuts · F5/F6/F7 headings · Ctrl-A select all · Ctrl-C copy · Ctrl-S save"
 	themeName := selectedThemeName()
 	now := time.Now()
 	e := &editor{screen: s, path: path, untitled: untitled, lines: lines, status: status, themeName: themeName, theme: themeByName(themeName), lastAction: now, modTime: modTime, showCoach: !untitled, coachUntil: now.Add(5 * time.Second), showStartMenu: untitled}
@@ -183,40 +184,40 @@ func themeByName(name string) theme {
 		return theme{
 			text: tcell.GetColor("#7dff9a"), heading1: tcell.GetColor("#dcff6b"), heading2: tcell.GetColor("#55f6ff"), heading3: tcell.GetColor("#ffcc66"), table: tcell.GetColor("#55f6ff"), quote: tcell.GetColor("#5a8f63"),
 			background: tcell.GetColor("#020805"), statusBG: tcell.GetColor("#063d1f"), statusFG: tcell.GetColor("#c6ffd1"), muted: tcell.GetColor("#226b38"),
-			selectionBG: tcell.GetColor("#1f6f43"), selectionFG: tcell.GetColor("#f4fff4"), searchBG: tcell.GetColor("#6b5f00"), searchFG: tcell.GetColor("#fffbd1"), codeFG: tcell.GetColor("#f6ff8f"), codeBG: tcell.GetColor("#123019"),
+			selectionBG: tcell.GetColor("#1f6f43"), selectionFG: tcell.GetColor("#f4fff4"), searchBG: tcell.GetColor("#6b5f00"), searchFG: tcell.GetColor("#fffbd1"), codeFG: tcell.GetColor("#f6ff8f"), codeBG: tcell.GetColor("#123019"), highlightBG: tcell.GetColor("#d6ff3f"), highlightFG: tcell.GetColor("#081008"), focusBG: tcell.GetColor("#07150c"), dimBG: tcell.GetColor("#020805"),
 			accent1: tcell.GetColor("#45f7b0"), accent2: tcell.GetColor("#ff6b7a"), accent3: tcell.GetColor("#fff06a"), accent4: tcell.GetColor("#708a75"),
 		}
 	case "midnight":
 		return theme{
 			text: tcell.GetColor("#d8dee9"), heading1: tcell.GetColor("#8fbcff"), heading2: tcell.GetColor("#88c0d0"), heading3: tcell.GetColor("#b48ead"), table: tcell.GetColor("#8fbcff"), quote: tcell.GetColor("#6f7f95"),
 			background: tcell.GetColor("#0b1020"), statusBG: tcell.GetColor("#1b2740"), statusFG: tcell.GetColor("#e6edf7"), muted: tcell.GetColor("#4c566a"),
-			selectionBG: tcell.GetColor("#314a6e"), selectionFG: tcell.GetColor("#ffffff"), searchBG: tcell.GetColor("#6f4e1f"), searchFG: tcell.GetColor("#fff2cc"), codeFG: tcell.GetColor("#a3be8c"), codeBG: tcell.GetColor("#152033"),
+			selectionBG: tcell.GetColor("#314a6e"), selectionFG: tcell.GetColor("#ffffff"), searchBG: tcell.GetColor("#6f4e1f"), searchFG: tcell.GetColor("#fff2cc"), codeFG: tcell.GetColor("#a3be8c"), codeBG: tcell.GetColor("#152033"), highlightBG: tcell.GetColor("#ebcb8b"), highlightFG: tcell.GetColor("#111827"), focusBG: tcell.GetColor("#111a2e"), dimBG: tcell.GetColor("#080d19"),
 			accent1: tcell.GetColor("#8fbcff"), accent2: tcell.GetColor("#bf616a"), accent3: tcell.GetColor("#ebcb8b"), accent4: tcell.GetColor("#7b8798"),
 		}
 	case "paper":
 		return theme{
 			text: tcell.GetColor("#1f2933"), heading1: tcell.GetColor("#1d4ed8"), heading2: tcell.GetColor("#0f766e"), heading3: tcell.GetColor("#7c3aed"), table: tcell.GetColor("#0f766e"), quote: tcell.GetColor("#64748b"),
 			background: tcell.GetColor("#fbf7ef"), statusBG: tcell.GetColor("#e7dfd0"), statusFG: tcell.GetColor("#1f2933"), muted: tcell.GetColor("#94a3b8"),
-			selectionBG: tcell.GetColor("#bfdbfe"), selectionFG: tcell.GetColor("#111827"), searchBG: tcell.GetColor("#fde68a"), searchFG: tcell.GetColor("#111827"), codeFG: tcell.GetColor("#7c2d12"), codeBG: tcell.GetColor("#f1eadc"),
+			selectionBG: tcell.GetColor("#bfdbfe"), selectionFG: tcell.GetColor("#111827"), searchBG: tcell.GetColor("#fde68a"), searchFG: tcell.GetColor("#111827"), codeFG: tcell.GetColor("#7c2d12"), codeBG: tcell.GetColor("#f1eadc"), highlightBG: tcell.GetColor("#facc15"), highlightFG: tcell.GetColor("#111827"), focusBG: tcell.GetColor("#fffdf7"), dimBG: tcell.GetColor("#f2eadc"),
 			accent1: tcell.GetColor("#0f766e"), accent2: tcell.GetColor("#dc2626"), accent3: tcell.GetColor("#b45309"), accent4: tcell.GetColor("#64748b"),
 		}
 	case "ember":
 		return theme{
 			text: tcell.GetColor("#f4e7d3"), heading1: tcell.GetColor("#ffb86b"), heading2: tcell.GetColor("#ff7a59"), heading3: tcell.GetColor("#ffd166"), table: tcell.GetColor("#f78c6c"), quote: tcell.GetColor("#9f7a60"),
 			background: tcell.GetColor("#120d0b"), statusBG: tcell.GetColor("#3b1f16"), statusFG: tcell.GetColor("#ffe8cc"), muted: tcell.GetColor("#6b4b3b"),
-			selectionBG: tcell.GetColor("#7a3f22"), selectionFG: tcell.GetColor("#fff7ed"), searchBG: tcell.GetColor("#8f5e15"), searchFG: tcell.GetColor("#fff3c4"), codeFG: tcell.GetColor("#ffd166"), codeBG: tcell.GetColor("#261611"),
+			selectionBG: tcell.GetColor("#7a3f22"), selectionFG: tcell.GetColor("#fff7ed"), searchBG: tcell.GetColor("#8f5e15"), searchFG: tcell.GetColor("#fff3c4"), codeFG: tcell.GetColor("#ffd166"), codeBG: tcell.GetColor("#261611"), highlightBG: tcell.GetColor("#ffb703"), highlightFG: tcell.GetColor("#1f130d"), focusBG: tcell.GetColor("#1c110d"), dimBG: tcell.GetColor("#0d0908"),
 			accent1: tcell.GetColor("#ff9f6e"), accent2: tcell.GetColor("#ff5d5d"), accent3: tcell.GetColor("#ffd166"), accent4: tcell.GetColor("#a78b78"),
 		}
 	case "mono":
-		return theme{text: tcell.ColorSilver, heading1: tcell.ColorWhite, heading2: tcell.ColorWhite, heading3: tcell.ColorSilver, table: tcell.ColorSilver, quote: tcell.ColorGray, background: tcell.ColorDefault, statusBG: tcell.ColorGray, statusFG: tcell.ColorBlack, muted: tcell.ColorDarkGray, selectionBG: tcell.ColorGray, selectionFG: tcell.ColorWhite, searchBG: tcell.ColorWhite, searchFG: tcell.ColorBlack, codeFG: tcell.ColorWhite, codeBG: tcell.ColorBlack, accent1: tcell.ColorWhite, accent2: tcell.ColorSilver, accent3: tcell.ColorWhite, accent4: tcell.ColorGray}
+		return theme{text: tcell.ColorSilver, heading1: tcell.ColorWhite, heading2: tcell.ColorWhite, heading3: tcell.ColorSilver, table: tcell.ColorSilver, quote: tcell.ColorGray, background: tcell.ColorDefault, statusBG: tcell.ColorGray, statusFG: tcell.ColorBlack, muted: tcell.ColorDarkGray, selectionBG: tcell.ColorGray, selectionFG: tcell.ColorWhite, searchBG: tcell.ColorWhite, searchFG: tcell.ColorBlack, codeFG: tcell.ColorWhite, codeBG: tcell.ColorBlack, highlightBG: tcell.ColorWhite, highlightFG: tcell.ColorBlack, focusBG: tcell.ColorBlack, dimBG: tcell.ColorDefault, accent1: tcell.ColorWhite, accent2: tcell.ColorSilver, accent3: tcell.ColorWhite, accent4: tcell.ColorGray}
 	case "light":
-		return theme{text: tcell.ColorBlack, heading1: tcell.ColorDarkBlue, heading2: tcell.ColorDarkGreen, heading3: tcell.ColorDarkGoldenrod, table: tcell.ColorDarkGreen, quote: tcell.ColorDarkSlateGray, background: tcell.ColorWhite, statusBG: tcell.ColorLightGray, statusFG: tcell.ColorBlack, muted: tcell.ColorDarkGray, selectionBG: tcell.GetColor("#c7d2fe"), selectionFG: tcell.ColorBlack, searchBG: tcell.GetColor("#fde68a"), searchFG: tcell.ColorBlack, codeFG: tcell.GetColor("#7c2d12"), codeBG: tcell.GetColor("#f3f4f6"), accent1: tcell.ColorDarkGreen, accent2: tcell.ColorMaroon, accent3: tcell.ColorDarkGoldenrod, accent4: tcell.ColorDarkGray}
+		return theme{text: tcell.ColorBlack, heading1: tcell.ColorDarkBlue, heading2: tcell.ColorDarkGreen, heading3: tcell.ColorDarkGoldenrod, table: tcell.ColorDarkGreen, quote: tcell.ColorDarkSlateGray, background: tcell.ColorWhite, statusBG: tcell.ColorLightGray, statusFG: tcell.ColorBlack, muted: tcell.ColorDarkGray, selectionBG: tcell.GetColor("#c7d2fe"), selectionFG: tcell.ColorBlack, searchBG: tcell.GetColor("#fde68a"), searchFG: tcell.ColorBlack, codeFG: tcell.GetColor("#7c2d12"), codeBG: tcell.GetColor("#f3f4f6"), highlightBG: tcell.GetColor("#facc15"), highlightFG: tcell.ColorBlack, focusBG: tcell.ColorWhite, dimBG: tcell.GetColor("#f3f4f6"), accent1: tcell.ColorDarkGreen, accent2: tcell.ColorMaroon, accent3: tcell.ColorDarkGoldenrod, accent4: tcell.ColorDarkGray}
 	case "ia-light":
-		return theme{text: tcell.GetColor("#1c1c1e"), heading1: tcell.GetColor("#007aff"), heading2: tcell.GetColor("#111111"), heading3: tcell.GetColor("#3a3a3c"), table: tcell.GetColor("#007aff"), quote: tcell.GetColor("#8e8e93"), background: tcell.GetColor("#f5f5f7"), statusBG: tcell.GetColor("#e5e5ea"), statusFG: tcell.GetColor("#1c1c1e"), muted: tcell.GetColor("#aeaeb2"), selectionBG: tcell.GetColor("#bfdbfe"), selectionFG: tcell.GetColor("#1c1c1e"), searchBG: tcell.GetColor("#fde68a"), searchFG: tcell.GetColor("#1c1c1e"), codeFG: tcell.GetColor("#007aff"), codeBG: tcell.GetColor("#e5e5ea"), accent1: tcell.GetColor("#007aff"), accent2: tcell.GetColor("#ff3b30"), accent3: tcell.GetColor("#ff9500"), accent4: tcell.GetColor("#8e8e93")}
+		return theme{text: tcell.GetColor("#1c1c1e"), heading1: tcell.GetColor("#007aff"), heading2: tcell.GetColor("#111111"), heading3: tcell.GetColor("#3a3a3c"), table: tcell.GetColor("#007aff"), quote: tcell.GetColor("#8e8e93"), background: tcell.GetColor("#f5f5f7"), statusBG: tcell.GetColor("#e5e5ea"), statusFG: tcell.GetColor("#1c1c1e"), muted: tcell.GetColor("#aeaeb2"), selectionBG: tcell.GetColor("#bfdbfe"), selectionFG: tcell.GetColor("#1c1c1e"), searchBG: tcell.GetColor("#fde68a"), searchFG: tcell.GetColor("#1c1c1e"), codeFG: tcell.GetColor("#007aff"), codeBG: tcell.GetColor("#e5e5ea"), highlightBG: tcell.GetColor("#ffd60a"), highlightFG: tcell.GetColor("#1c1c1e"), focusBG: tcell.GetColor("#ffffff"), dimBG: tcell.GetColor("#ececf0"), accent1: tcell.GetColor("#007aff"), accent2: tcell.GetColor("#ff3b30"), accent3: tcell.GetColor("#ff9500"), accent4: tcell.GetColor("#8e8e93")}
 	case "ia-dark":
-		return theme{text: tcell.GetColor("#e5e5ea"), heading1: tcell.GetColor("#0a84ff"), heading2: tcell.GetColor("#ffffff"), heading3: tcell.GetColor("#d1d1d6"), table: tcell.GetColor("#0a84ff"), quote: tcell.GetColor("#636366"), background: tcell.GetColor("#161617"), statusBG: tcell.GetColor("#2c2c2e"), statusFG: tcell.GetColor("#e5e5ea"), muted: tcell.GetColor("#48484a"), selectionBG: tcell.GetColor("#1f4f86"), selectionFG: tcell.GetColor("#ffffff"), searchBG: tcell.GetColor("#6f4e1f"), searchFG: tcell.GetColor("#fff2cc"), codeFG: tcell.GetColor("#64d2ff"), codeBG: tcell.GetColor("#202124"), accent1: tcell.GetColor("#64d2ff"), accent2: tcell.GetColor("#ff453a"), accent3: tcell.GetColor("#ffd60a"), accent4: tcell.GetColor("#636366")}
+		return theme{text: tcell.GetColor("#e5e5ea"), heading1: tcell.GetColor("#0a84ff"), heading2: tcell.GetColor("#ffffff"), heading3: tcell.GetColor("#d1d1d6"), table: tcell.GetColor("#0a84ff"), quote: tcell.GetColor("#636366"), background: tcell.GetColor("#161617"), statusBG: tcell.GetColor("#2c2c2e"), statusFG: tcell.GetColor("#e5e5ea"), muted: tcell.GetColor("#48484a"), selectionBG: tcell.GetColor("#1f4f86"), selectionFG: tcell.GetColor("#ffffff"), searchBG: tcell.GetColor("#6f4e1f"), searchFG: tcell.GetColor("#fff2cc"), codeFG: tcell.GetColor("#64d2ff"), codeBG: tcell.GetColor("#202124"), highlightBG: tcell.GetColor("#ffd60a"), highlightFG: tcell.GetColor("#111111"), focusBG: tcell.GetColor("#1d1d20"), dimBG: tcell.GetColor("#121214"), accent1: tcell.GetColor("#64d2ff"), accent2: tcell.GetColor("#ff453a"), accent3: tcell.GetColor("#ffd60a"), accent4: tcell.GetColor("#636366")}
 	default:
-		return theme{text: tcell.ColorSilver, heading1: tcell.ColorLightSkyBlue, heading2: tcell.ColorLightGreen, heading3: tcell.ColorLightGoldenrodYellow, table: tcell.ColorPaleGreen, quote: tcell.ColorGray, background: tcell.ColorDefault, statusBG: tcell.ColorDarkSlateGray, statusFG: tcell.ColorWhite, muted: tcell.ColorDarkGray, selectionBG: tcell.ColorDodgerBlue, selectionFG: tcell.ColorWhite, searchBG: tcell.ColorDarkGoldenrod, searchFG: tcell.ColorWhite, codeFG: tcell.ColorLightGoldenrodYellow, codeBG: tcell.ColorDarkSlateGray, accent1: tcell.ColorLightSeaGreen, accent2: tcell.ColorLightCoral, accent3: tcell.ColorLightYellow, accent4: tcell.ColorGray}
+		return theme{text: tcell.ColorSilver, heading1: tcell.ColorLightSkyBlue, heading2: tcell.ColorLightGreen, heading3: tcell.ColorLightGoldenrodYellow, table: tcell.ColorPaleGreen, quote: tcell.ColorGray, background: tcell.ColorDefault, statusBG: tcell.ColorDarkSlateGray, statusFG: tcell.ColorWhite, muted: tcell.ColorDarkGray, selectionBG: tcell.ColorDodgerBlue, selectionFG: tcell.ColorWhite, searchBG: tcell.ColorDarkGoldenrod, searchFG: tcell.ColorWhite, codeFG: tcell.ColorLightGoldenrodYellow, codeBG: tcell.ColorDarkSlateGray, highlightBG: tcell.ColorGoldenrod, highlightFG: tcell.ColorBlack, focusBG: tcell.ColorDefault, dimBG: tcell.ColorDefault, accent1: tcell.ColorLightSeaGreen, accent2: tcell.ColorLightCoral, accent3: tcell.ColorLightYellow, accent4: tcell.ColorGray}
 	}
 }
 
@@ -588,6 +589,12 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		e.openRecentFiles()
 	case tcell.KeyF4:
 		e.openStartMenu()
+	case tcell.KeyF5:
+		e.toggleHeading(1)
+	case tcell.KeyF6:
+		e.toggleHeading(2)
+	case tcell.KeyF7:
+		e.toggleHeading(3)
 	case tcell.KeyCtrlG:
 		e.cycleTheme()
 	case tcell.KeyCtrlL:
@@ -1603,6 +1610,42 @@ func (e *editor) insertEmptyMarkers(open, close string) {
 	e.dirty = true
 }
 
+func (e *editor) toggleHeading(level int) {
+	if level < 1 || level > 6 || e.y < 0 || e.y >= len(e.lines) {
+		return
+	}
+	e.checkpoint()
+	line := e.lines[e.y]
+	indent := line[:len(line)-len(strings.TrimLeft(line, " "))]
+	oldPrefixLen := runeLen(indent)
+	body := strings.TrimSpace(line[len(indent):])
+	if existingLevel, text, ok := heading(line); ok {
+		oldPrefixLen += existingLevel + 1
+		body = text
+		if existingLevel == level {
+			e.lines[e.y] = indent + body
+			e.x = min(max(e.x-(existingLevel+1), 0), runeLen(e.lines[e.y]))
+			e.selecting = false
+			e.dirty = true
+			e.status = "Removed heading"
+			return
+		}
+	}
+	prefix := strings.Repeat("#", level) + " "
+	e.lines[e.y] = indent + prefix + body
+	newPrefixLen := runeLen(indent) + runeLen(prefix)
+	if body == "" {
+		e.x = newPrefixLen
+	} else if e.x >= oldPrefixLen {
+		e.x = min(max(e.x-oldPrefixLen+newPrefixLen, 0), runeLen(e.lines[e.y]))
+	} else {
+		e.x = min(e.x, runeLen(e.lines[e.y]))
+	}
+	e.selecting = false
+	e.dirty = true
+	e.status = "Heading " + strconv.Itoa(level)
+}
+
 func emphasisLabel(open, close string) string {
 	switch open {
 	case "**", "__":
@@ -2072,6 +2115,7 @@ func (e *editor) drawHelp(w, h int) {
 		"Drag             Select text",
 		"Ctrl-C/X/V       Copy / cut / paste",
 		"Ctrl-B/E/U/H     Bold / italic / underline / highlight",
+		"F5 / F6 / F7     Heading 1 / 2 / 3",
 		"Ctrl-Space       Toggle checkbox",
 		"Ctrl-O           Link selection",
 		"Ctrl-T           Create table",
@@ -2102,7 +2146,7 @@ func (e *editor) drawCoach(w, h int) {
 	lines := []string{
 		" MARKO ",
 		"Markdown focus",
-		"F2 save as   F3 recent   Ctrl-A select all",
+		"F2 save as   F3 recent   F5/F6/F7 headings",
 		"F1 more   Esc dismiss",
 	}
 	width := 0
@@ -2588,9 +2632,7 @@ func (e *editor) putCodeLine(left, row int, vr visualRow, style tcell.Style, max
 func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width int) {
 	if _, _, ok := e.codeFenceBounds(vr.y); ok {
 		style := tcell.StyleDefault.Foreground(e.theme.codeFG).Background(e.theme.codeBG)
-		if e.focusMode && !current {
-			style = tcell.StyleDefault.Foreground(e.theme.muted).Background(e.theme.background)
-		}
+		style = e.focusStyle(style, current)
 		e.putCodeLine(left, row, vr, style, left+width)
 		return
 	}
@@ -2599,8 +2641,8 @@ func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width
 		if e.positionSelected(0, vr.y) {
 			style = e.selectedStyle(style)
 		} else {
-			if e.focusMode && !current {
-				style = style.Foreground(e.theme.muted)
+			if e.focusMode {
+				style = e.focusStyle(style, current)
 			} else {
 				switch vr.start {
 				case 0:
@@ -2624,8 +2666,8 @@ func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width
 		if e.positionSelected(0, vr.y) {
 			style = e.selectedStyle(style)
 		} else {
-			if e.focusMode && !current {
-				style = style.Foreground(e.theme.muted)
+			if e.focusMode {
+				style = e.focusStyle(style, current)
 			} else {
 				if vr.start == 0 {
 					style = style.Foreground(e.theme.heading3).Bold(true)
@@ -2639,9 +2681,7 @@ func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width
 	}
 	if isRule(vr.text) && !current {
 		style := tcell.StyleDefault.Foreground(e.theme.quote)
-		if e.focusMode && !current {
-			style = style.Foreground(e.theme.muted)
-		}
+		style = e.focusStyle(style, current)
 		if e.positionSelected(0, vr.y) {
 			style = e.selectedStyle(style)
 		}
@@ -2662,9 +2702,7 @@ func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width
 		return
 	}
 	style := tcell.StyleDefault.Foreground(e.theme.text).Background(e.theme.background)
-	if e.focusMode && !current {
-		style = style.Foreground(e.theme.muted)
-	}
+	style = e.focusStyle(style, current)
 	// Reconstruct the rendered line exactly as visualRows wrapped it, so that
 	// vr.start aligns with the rune offsets emphasis markers use. For
 	// non-current block quotes visualRows prepends "│ " to the quote body.
@@ -2702,9 +2740,7 @@ func (e *editor) zopaFenceBounds(y int) (int, int, bool) {
 func (e *editor) drawLine(left, row, y int, line string, current bool, width int) {
 	if isRule(line) && !current {
 		style := tcell.StyleDefault.Foreground(e.theme.quote)
-		if e.focusMode && !current {
-			style = style.Foreground(e.theme.muted)
-		}
+		style = e.focusStyle(style, current)
 		ruleText := renderRule(width)
 		padding := (width - len([]rune(ruleText))) / 2
 		if padding < 0 {
@@ -2714,9 +2750,7 @@ func (e *editor) drawLine(left, row, y int, line string, current bool, width int
 		return
 	}
 	style := tcell.StyleDefault.Foreground(e.theme.text).Background(e.theme.background)
-	if e.focusMode && !current {
-		style = style.Foreground(e.theme.muted)
-	}
+	style = e.focusStyle(style, current)
 	if line == "" && e.positionSelected(0, y) {
 		e.put(left, row, strings.Repeat(" ", width), e.selectedStyle(style), left+width)
 		return
@@ -2734,7 +2768,7 @@ func (e *editor) drawLine(left, row, y int, line string, current bool, width int
 		if quote, ok := blockQuote(line); ok {
 			line = "│ " + quote
 			if e.focusMode && !current {
-				style = style.Foreground(e.theme.muted)
+				style = e.focusStyle(style, current)
 			} else {
 				style = style.Foreground(e.theme.quote)
 			}
@@ -2798,6 +2832,28 @@ func (e *editor) searchStyle(style tcell.Style) tcell.Style {
 func (e *editor) inlineCodeStyle(style tcell.Style) tcell.Style {
 	th := e.activeTheme()
 	return style.Foreground(th.codeFG).Background(th.codeBG)
+}
+
+func (e *editor) focusStyle(style tcell.Style, current bool) tcell.Style {
+	if !e.focusMode {
+		return style
+	}
+	if current {
+		return style.Background(e.theme.focusBG)
+	}
+	return style.Foreground(e.theme.muted).Background(e.theme.dimBG)
+}
+
+func (e *editor) highlightStyle(style tcell.Style) tcell.Style {
+	th := e.activeTheme()
+	return style.Background(th.highlightBG).Foreground(th.highlightFG)
+}
+
+func (e *editor) emphasisStyle(marker string, styled func(tcell.Style) tcell.Style, style tcell.Style) tcell.Style {
+	if marker == "==" {
+		return e.highlightStyle(style)
+	}
+	return styled(style)
 }
 
 func (e *editor) activeTheme() theme {
@@ -2997,7 +3053,7 @@ func inlinePlainText(value string) string {
 	runes := []rune(value)
 	var plain []rune
 	for i := 0; i < len(runes); {
-		openLen, closeLen, _, end := emphasisAt(runes, i)
+		openLen, closeLen, _, _, end := emphasisAt(runes, i)
 		if openLen > 0 {
 			plain = append(plain, runes[i+openLen:end]...)
 			i = end + closeLen
@@ -3035,7 +3091,7 @@ func sourceColumnForRenderedColumn(line string, start, renderedColumn int) int {
 				continue
 			}
 		}
-		openLen, closeLen, _, end := emphasisAt(runes, i)
+		openLen, closeLen, _, _, end := emphasisAt(runes, i)
 		if openLen > 0 {
 			sourceAtBoundary = max(sourceAtBoundary, i+openLen)
 			for idx := i + openLen; idx < end; idx++ {
@@ -3103,13 +3159,13 @@ func (e *editor) putInline(x, screenY int, text string, base tcell.Style, maxWid
 				continue
 			}
 		}
-		marker, closeLen, styled, end := emphasisAt(runes, i)
+		marker, closeLen, markerText, styled, end := emphasisAt(runes, i)
 		if marker > 0 {
 			for idx, r := range runes[i+marker : end] {
 				if x >= maxWidth {
 					break
 				}
-				rStyle := styled(s)
+				rStyle := e.emphasisStyle(markerText, styled, s)
 				if e.focusMode && y != e.y {
 					rStyle = s
 				}
@@ -3156,7 +3212,7 @@ func (e *editor) putInlineWindow(x, screenY int, line string, base tcell.Style, 
 				continue
 			}
 		}
-		openLen, closeLen, styled, end := emphasisAt(runes, i)
+		openLen, closeLen, markerText, styled, end := emphasisAt(runes, i)
 		if openLen > 0 {
 			innerStart := i + openLen
 			innerEnd := end
@@ -3171,7 +3227,7 @@ func (e *editor) putInlineWindow(x, screenY int, line string, base tcell.Style, 
 					break
 				}
 				s := base
-				rStyle := styled(s)
+				rStyle := e.emphasisStyle(markerText, styled, s)
 				if e.focusMode && y != e.y {
 					rStyle = s
 				}
@@ -3210,7 +3266,7 @@ func closingRune(runes []rune, start int, target rune) int {
 	return -1
 }
 
-func emphasisAt(runes []rune, start int) (int, int, func(tcell.Style) tcell.Style, int) {
+func emphasisAt(runes []rune, start int) (int, int, string, func(tcell.Style) tcell.Style, int) {
 	type markerStyle struct {
 		marker string
 		style  func(tcell.Style) tcell.Style
@@ -3219,9 +3275,7 @@ func emphasisAt(runes []rune, start int) (int, int, func(tcell.Style) tcell.Styl
 		{"**", func(s tcell.Style) tcell.Style { return s.Bold(true) }},
 		{"__", func(s tcell.Style) tcell.Style { return s.Bold(true) }},
 		{"~~", func(s tcell.Style) tcell.Style { return s.StrikeThrough(true) }},
-		{"==", func(s tcell.Style) tcell.Style {
-			return s.Background(tcell.ColorGoldenrod).Foreground(tcell.ColorBlack)
-		}},
+		{"==", func(s tcell.Style) tcell.Style { return s.Reverse(true) }},
 		{"*", func(s tcell.Style) tcell.Style { return s.Italic(true) }},
 		{"_", func(s tcell.Style) tcell.Style { return s.Italic(true) }},
 	}
@@ -3232,7 +3286,7 @@ func emphasisAt(runes []rune, start int) (int, int, func(tcell.Style) tcell.Styl
 		}
 		for end := start + len(marker) + 1; end+len(marker) <= len(runes); end++ {
 			if runesEqualAt(runes, end, marker) {
-				return len(marker), len(marker), candidate.style, end
+				return len(marker), len(marker), candidate.marker, candidate.style, end
 			}
 		}
 	}
@@ -3253,11 +3307,11 @@ func emphasisAt(runes []rune, start int) (int, int, func(tcell.Style) tcell.Styl
 		}
 		for end := start + len(open); end+len(close) <= len(runes); end++ {
 			if runesEqualAt(runes, end, close) {
-				return len(open), len(close), candidate.style, end
+				return len(open), len(close), candidate.open, candidate.style, end
 			}
 		}
 	}
-	return 0, 0, nil, 0
+	return 0, 0, "", nil, 0
 }
 
 func runesEqualAt(haystack []rune, start int, needle []rune) bool {
