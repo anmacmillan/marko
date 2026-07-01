@@ -133,7 +133,7 @@ func newEditor(path string, untitled bool) (*editor, error) {
 	status := "F1 shortcuts · F5/F6/F7 headings · Ctrl-A select all · Ctrl-C copy · Ctrl-S save"
 	themeName := selectedThemeName()
 	now := time.Now()
-	e := &editor{screen: s, path: path, untitled: untitled, lines: lines, status: status, themeName: themeName, theme: themeByName(themeName), lastAction: now, modTime: modTime, showCoach: !untitled, coachUntil: now.Add(5 * time.Second), showStartMenu: untitled}
+	e := &editor{screen: s, path: path, untitled: untitled, lines: lines, status: status, themeName: themeName, theme: themeByName(themeName), lastAction: now, focusMode: true, modTime: modTime, showCoach: !untitled, coachUntil: now.Add(5 * time.Second), showStartMenu: untitled}
 	if !untitled {
 		e.rememberRecent(path)
 	} else {
