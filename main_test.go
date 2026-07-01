@@ -639,6 +639,22 @@ func TestInlineCodeRendering(t *testing.T) {
 	}
 }
 
+func TestInlineCodeUsesThemePalette(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(20, 3)
+	e := &editor{screen: screen, lines: []string{"`code`"}, theme: themeByName("midnight")}
+	e.putInline(0, 0, "`code`", tcell.StyleDefault, 20, 0, 0)
+	_, _, style, _ := screen.GetContent(0, 0)
+	fg, bg, _ := style.Decompose()
+	if fg != e.theme.codeFG || bg != e.theme.codeBG {
+		t.Fatalf("inline code style = fg %v bg %v, want fg %v bg %v", fg, bg, e.theme.codeFG, e.theme.codeBG)
+	}
+}
+
 func TestCurrentLineRendersInlineMarkdown(t *testing.T) {
 	screen := tcell.NewSimulationScreen("UTF-8")
 	if err := screen.Init(); err != nil {
@@ -774,6 +790,36 @@ func TestThemeNamesAreValid(t *testing.T) {
 	}
 	if validTheme("unknown") {
 		t.Fatal("unknown theme accepted")
+	}
+}
+
+func TestNewPolishedThemesAreAvailable(t *testing.T) {
+	for _, name := range []string{"matrix", "midnight", "paper", "ember"} {
+		if !validTheme(name) {
+			t.Fatalf("polished theme %q is not valid", name)
+		}
+		th := themeByName(name)
+		if th.text == tcell.ColorDefault || th.statusBG == tcell.ColorDefault || th.selectionBG == tcell.ColorDefault {
+			t.Fatalf("theme %q has incomplete palette: %#v", name, th)
+		}
+	}
+}
+
+func TestSelectionUsesThemePalette(t *testing.T) {
+	e := &editor{lines: []string{"x"}, theme: themeByName("matrix")}
+	style := e.selectedStyle(tcell.StyleDefault)
+	_, bg, _ := style.Decompose()
+	if bg != e.theme.selectionBG {
+		t.Fatalf("selection background = %v, want %v", bg, e.theme.selectionBG)
+	}
+}
+
+func TestSearchUsesThemePalette(t *testing.T) {
+	e := &editor{lines: []string{"match"}, search: "match", theme: themeByName("ember")}
+	style := e.searchStyle(tcell.StyleDefault)
+	_, bg, _ := style.Decompose()
+	if bg != e.theme.searchBG {
+		t.Fatalf("search background = %v, want %v", bg, e.theme.searchBG)
 	}
 }
 

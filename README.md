@@ -57,13 +57,13 @@ Marko works perfectly alongside external automations, scripts, or AI assistants.
 | Key | Action |
 |---|---|
 | `F1` | Show shortcut help |
-| `Ctrl-S` / `Ctrl-Shift-S` | Save / Save As (first save of an untitled doc always asks for a name) |
+| `Ctrl-S` / `F2` / `Ctrl-Shift-S` | Save / Save As (first save of an untitled doc always asks for a name) |
 | `Ctrl-B` | Bold (`**…**`) — wrap/unwrap selection, or insert empty markers |
 | `Ctrl-E` | Italic (`*…*`) — wrap/unwrap selection, or insert empty markers |
 | `Ctrl-U` | Underline (`<u>…</u>`) — wrap/unwrap selection, or insert empty markers |
 | `Ctrl-H` | Highlight (`==…==`, yellow) — wrap/unwrap selection, or insert empty markers |
 | `Ctrl-A` | Select all |
-| `Ctrl-Shift-E` | Open recent Markdown file |
+| `F3` / `Ctrl-Shift-E` | Open recent Markdown file |
 | `Ctrl-F` / `Ctrl-N` / `Ctrl-P` | Search / next / previous |
 | `Ctrl-R` | Replace current; `Ctrl-A` in prompt replaces all |
 | `Ctrl-Z` / `Ctrl-Y` | Undo / redo |
@@ -99,12 +99,16 @@ make test         # optional: run the test suite
 ## Themes And Fonts
 
 ```sh
+MARKO_THEME=matrix marko document.md
+MARKO_THEME=midnight marko document.md
+MARKO_THEME=paper marko document.md
+MARKO_THEME=ember marko document.md
 MARKO_THEME=green marko document.md
 MARKO_THEME=mono marko document.md
 MARKO_THEME=light marko document.md
 ```
 
-Press `Ctrl-G` to cycle and remember themes. Marko inherits your terminal font; for a warmer writing feel, try Berkeley Mono, iA Writer Mono, or Atkinson Hyperlegible Mono in your terminal settings.
+Press `Ctrl-G` to cycle and remember themes. `matrix` is the phosphor terminal-focus palette; `midnight` is a quiet dark writing palette; `paper` is warm and bright; `ember` is a warmer evening dark theme. Marko inherits your terminal font; for a warmer writing feel, try Berkeley Mono, iA Writer Mono, or Atkinson Hyperlegible Mono in your terminal settings.
 
 ## Philosophy
 
