@@ -279,6 +279,9 @@ func (e *editor) run() {
 	defer ticker.Stop()
 	go func() {
 		for range ticker.C {
+			if e.showStartMenu {
+				continue
+			}
 			e.screen.PostEvent(tcell.NewEventInterrupt(nil))
 		}
 	}()

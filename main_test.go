@@ -1687,6 +1687,23 @@ func TestStartMenuCanShowHelpOverlay(t *testing.T) {
 	}
 }
 
+func TestStartMenuTickDoesNotAutosave(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "note.md")
+	e := &editor{
+		lines:         []string{"draft"},
+		path:          path,
+		dirty:         true,
+		lastEdit:      time.Now().Add(-3 * time.Second),
+		theme:         themeByName("calm"),
+		showStartMenu: true,
+	}
+	e.tick()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("start menu tick wrote file or unexpected stat error: %v", err)
+	}
+}
+
 func TestInlinePlainTextStripsUnderlineAndHighlight(t *testing.T) {
 	tests := []struct{ in, want string }{
 		{"<u>under</u>", "under"},
