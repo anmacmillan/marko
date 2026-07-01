@@ -2059,6 +2059,43 @@ func TestSavePromptShowsZoxideHint(t *testing.T) {
 	}
 }
 
+func TestPromptRendersInFocusMode(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(80, 4)
+	e := &editor{
+		screen:       screen,
+		lines:        []string{"hello"},
+		theme:        themeByName("calm"),
+		focusMode:    true,
+		prompt:       "Save as: ",
+		promptValue:  "untitled.md",
+		promptCursor: runeLen("untitled.md"),
+	}
+	e.draw()
+	got := strings.TrimRight(simulationLine(screen, 3, 80), " ")
+	if !strings.Contains(got, "Save as: untitled.md") {
+		t.Fatalf("prompt not visible in focus mode: %q", got)
+	}
+}
+
+func TestCtrlKTogglesFocusWhilePromptOpen(t *testing.T) {
+	e := &editor{
+		lines:        []string{"hello"},
+		focusMode:    true,
+		prompt:       "Save as: ",
+		promptValue:  "untitled.md",
+		promptCursor: runeLen("untitled.md"),
+	}
+	e.key(tcell.NewEventKey(tcell.KeyCtrlK, 0, tcell.ModCtrl))
+	if e.focusMode {
+		t.Fatal("Ctrl-K did not toggle focus mode while prompt was open")
+	}
+}
+
 func TestNamedSaveDoesNotPrompt(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "named.md")

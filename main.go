@@ -815,6 +815,8 @@ func (e *editor) promptKey(ev *tcell.EventKey) {
 	case tcell.KeyEsc:
 		e.prompt, e.promptValue, e.promptCursor = "", "", 0
 		e.status = "Cancelled"
+	case tcell.KeyCtrlK:
+		e.focusMode = !e.focusMode
 	case tcell.KeyEnter:
 		if e.prompt == "Find: " {
 			e.search = e.promptValue
@@ -2015,7 +2017,7 @@ func (e *editor) draw() {
 			status += "  [~/..., z query/file.md]"
 		}
 	}
-	if !e.focusMode {
+	if !e.focusMode || e.prompt != "" {
 		e.put(0, h-1, status, tcell.StyleDefault.Background(e.theme.statusBG).Foreground(e.theme.statusFG), w)
 	}
 	if e.showHelp {
