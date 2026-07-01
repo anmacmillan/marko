@@ -340,6 +340,15 @@ func simulationLine(screen tcell.SimulationScreen, y, width int) string {
 	return string(runes)
 }
 
+func findRenderedText(screen tcell.SimulationScreen, width, height int, needle string) (int, int, bool) {
+	for y := 0; y < height; y++ {
+		if x := strings.Index(simulationLine(screen, y, width), needle); x >= 0 {
+			return x, y, true
+		}
+	}
+	return 0, 0, false
+}
+
 func TestTruncateInlineCellProducesCleanText(t *testing.T) {
 	if got, want := truncateInlineCell("**A long bold value**", 8), "A long …"; got != want {
 		t.Fatalf("truncateInlineCell() = %q, want %q", got, want)
@@ -1884,6 +1893,11 @@ func TestStartMenuCanRenderStartupCoach(t *testing.T) {
 }
 
 func TestStartMenuRendersNewRecentAndOpenPath(t *testing.T) {
+	dir := t.TempDir()
+	recent := filepath.Join(dir, "one.md")
+	if err := os.WriteFile(recent, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	screen := tcell.NewSimulationScreen("UTF-8")
 	if err := screen.Init(); err != nil {
 		t.Fatal(err)
@@ -1895,7 +1909,7 @@ func TestStartMenuRendersNewRecentAndOpenPath(t *testing.T) {
 		lines:         []string{""},
 		theme:         themeByName("calm"),
 		showStartMenu: true,
-		recent:        []string{"/tmp/one.md"},
+		recent:        []string{recent},
 	}
 	e.draw()
 	var rendered strings.Builder
@@ -1904,10 +1918,102 @@ func TestStartMenuRendersNewRecentAndOpenPath(t *testing.T) {
 		rendered.WriteByte('\n')
 	}
 	text := rendered.String()
-	for _, want := range []string{"_____|  | ______", "New document", "/tmp/one.md", "Open path", "F1 help"} {
+	for _, want := range []string{"_____|  | ______", "New document", "one.md", "Open path", "F1 help"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("start menu did not render %q:\n%s", want, text)
 		}
+	}
+}
+
+func TestStartMenuGroupsRecentFilesByAge(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	fresh := filepath.Join(dir, "fresh.md")
+	week := filepath.Join(dir, "week.md")
+	old := filepath.Join(dir, "old.md")
+	ancient := filepath.Join(dir, "ancient.md")
+	for _, item := range []struct {
+		path string
+		when time.Time
+	}{
+		{fresh, now.Add(-2 * time.Hour)},
+		{week, now.Add(-3 * 24 * time.Hour)},
+		{old, now.Add(-10 * 24 * time.Hour)},
+		{ancient, now.Add(-21 * 24 * time.Hour)},
+	} {
+		if err := os.WriteFile(item.path, []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(item.path, item.when, item.when); err != nil {
+			t.Fatal(err)
+		}
+	}
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(120, 28)
+	e := &editor{
+		screen:        screen,
+		lines:         []string{""},
+		theme:         themeByName("calm"),
+		showStartMenu: true,
+		recent:        []string{fresh, week, old, ancient},
+	}
+	e.draw()
+	var rendered strings.Builder
+	for row := 0; row < 28; row++ {
+		rendered.WriteString(simulationLine(screen, row, 120))
+		rendered.WriteByte('\n')
+	}
+	text := rendered.String()
+	for _, want := range []string{"[R] Recent files", "Past 48 hours", "fresh.md", "Past week", "week.md", "Older", "old.md", "Older than 2 weeks", "ancient.md"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("start menu grouped recents missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Index(text, "[R] Recent files") > strings.Index(text, "Past 48 hours") ||
+		strings.Index(text, "Past 48 hours") > strings.Index(text, "Past week") ||
+		strings.Index(text, "Past week") > strings.Index(text, "Older") ||
+		strings.Index(text, "Older") > strings.Index(text, "Older than 2 weeks") {
+		t.Fatalf("start menu recent groups out of order:\n%s", text)
+	}
+}
+
+func TestStartMenuRecentRowsUseRecencyGradient(t *testing.T) {
+	dir := t.TempDir()
+	newPath := filepath.Join(dir, "new.md")
+	oldPath := filepath.Join(dir, "old.md")
+	if err := os.WriteFile(newPath, []byte("new"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(oldPath, []byte("old"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(120, 24)
+	e := &editor{
+		screen:        screen,
+		lines:         []string{""},
+		theme:         themeByName("calm"),
+		showStartMenu: true,
+		recent:        []string{newPath, oldPath},
+	}
+	e.draw()
+	x, y, ok := findRenderedText(screen, 120, 24, "new.md")
+	if !ok {
+		t.Fatal("new.md not rendered in start menu")
+	}
+	_, _, style, _ := screen.GetContent(x, y)
+	fg, _, attrs := style.Decompose()
+	want := recentGradientColor(0, 2)
+	if fg != want || attrs&tcell.AttrBold == 0 {
+		t.Fatalf("start menu newest recent style = fg:%v attrs:%v, want fg:%v bold", fg, attrs, want)
 	}
 }
 
@@ -1968,7 +2074,12 @@ func TestStartMenuEscapeReturnsToDocument(t *testing.T) {
 
 func TestStartMenuThemeActionCyclesTheme(t *testing.T) {
 	e := &editor{lines: []string{"x"}, themeName: "matrix", theme: themeByName("matrix"), showStartMenu: true}
-	e.startMenuIndex = 3
+	for i, item := range e.startMenuItems() {
+		if item.action == "theme" {
+			e.startMenuIndex = i
+			break
+		}
+	}
 	e.key(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
 	if e.themeName != "midnight" {
 		t.Fatalf("themeName = %q, want midnight", e.themeName)

@@ -1151,6 +1151,8 @@ type startMenuItem struct {
 	label      string
 	action     string
 	recentRank int
+	section    bool
+	selectable bool
 }
 
 func (e *editor) openStartMenu() {
@@ -1167,16 +1169,24 @@ func (e *editor) openStartMenu() {
 
 func (e *editor) startMenuItems() []startMenuItem {
 	items := []startMenuItem{
-		{label: "[N] New document", action: "new"},
-		{label: "[O] Open path...", action: "open"},
-		{label: "[R] Recent files", action: "recent"},
-		{label: "[T] Theme: " + e.displayThemeName(), action: "theme"},
+		{label: "[N] New document", action: "new", selectable: true},
+		{label: "[O] Open path...", action: "open", selectable: true},
+		{label: "[R] Recent files", action: "recent", selectable: true},
 	}
-	for i, path := range e.recent {
-		items = append(items, startMenuItem{label: "    " + recentDisplayLabel(path, 72), action: "open:" + path, recentRank: i})
+	for _, section := range groupedRecentFiles(e.recent) {
+		if len(section.entries) == 0 {
+			continue
+		}
+		items = append(items, startMenuItem{label: "    " + section.title, section: true})
+		for _, entry := range section.entries {
+			items = append(items, startMenuItem{label: "      " + recentDisplayLabel(entry.path, 72), action: "open:" + entry.path, recentRank: entry.rank, selectable: true})
+		}
 	}
-	items = append(items, startMenuItem{label: "Return to document", action: "return"})
-	items = append(items, startMenuItem{label: "[Q] Quit", action: "quit"})
+	items = append(items,
+		startMenuItem{label: "[T] Theme: " + e.displayThemeName(), action: "theme", selectable: true},
+		startMenuItem{label: "Return to document", action: "return", selectable: true},
+		startMenuItem{label: "[Q] Quit", action: "quit", selectable: true},
+	)
 	return items
 }
 
@@ -1193,7 +1203,13 @@ func (e *editor) moveStartMenuSelection(delta int) {
 		e.startMenuIndex = 0
 		return
 	}
-	e.startMenuIndex = (e.startMenuIndex + delta + len(items)) % len(items)
+	for step := 0; step < len(items); step++ {
+		e.startMenuIndex = (e.startMenuIndex + delta + len(items)) % len(items)
+		if items[e.startMenuIndex].selectable {
+			return
+		}
+	}
+	e.startMenuIndex = 0
 }
 
 func (e *editor) activateStartMenuAction(action string) bool {
@@ -2431,12 +2447,15 @@ func (e *editor) drawStartMenu(w, h int) {
 		"",
 	}...)
 	items := e.startMenuItems()
-	if e.startMenuIndex < 0 || e.startMenuIndex >= len(items) {
+	if e.startMenuIndex < 0 || e.startMenuIndex >= len(items) || !items[e.startMenuIndex].selectable {
 		e.startMenuIndex = 0
+		if len(items) > 0 && !items[e.startMenuIndex].selectable {
+			e.moveStartMenuSelection(1)
+		}
 	}
 	for i, item := range items {
 		prefix := "  "
-		if i == e.startMenuIndex {
+		if item.selectable && i == e.startMenuIndex {
 			prefix = "> "
 		}
 		lines = append(lines, prefix+item.label)
@@ -2457,16 +2476,19 @@ func (e *editor) drawStartMenu(w, h int) {
 			line = string([]rune(line)[:width])
 		}
 		style := box
-		if row == 0 {
+		if row < len(markoWordmark(w-8)) {
 			style = style.Bold(true)
 		} else if strings.HasPrefix(line, "> ") {
 			style = e.selectedStyle(style)
-		} else if row >= 4 {
-			itemIndex := row - 4
-			if itemIndex < len(items) {
+		} else {
+			itemIndex := row - len(markoWordmark(w-8)) - 2
+			if itemIndex >= 0 && itemIndex < len(items) {
 				item := items[itemIndex]
-				if strings.HasPrefix(item.action, "open:") {
-					style = e.recentStyle(style, item.recentRank, len(e.recent))
+				switch {
+				case item.section:
+					style = style.Bold(true)
+				case strings.HasPrefix(item.action, "open:"):
+					style = e.recentStyle(style, item.recentRank, recentItemCount(groupedRecentFiles(e.recent)))
 				}
 			}
 		}
@@ -2586,6 +2608,7 @@ func groupedRecentFiles(paths []string) []recentFileSection {
 		{title: "Past 48 hours"},
 		{title: "Past week"},
 		{title: "Older"},
+		{title: "Older than 2 weeks"},
 	}
 	rank := 0
 	now := time.Now()
@@ -2600,12 +2623,22 @@ func groupedRecentFiles(paths []string) []recentFileSection {
 			sections[0].entries = append(sections[0].entries, item)
 		case now.Sub(item.modTime) <= 7*24*time.Hour:
 			sections[1].entries = append(sections[1].entries, item)
-		default:
+		case now.Sub(item.modTime) <= 14*24*time.Hour:
 			sections[2].entries = append(sections[2].entries, item)
+		default:
+			sections[3].entries = append(sections[3].entries, item)
 		}
 		rank++
 	}
 	return sections
+}
+
+func recentItemCount(sections []recentFileSection) int {
+	total := 0
+	for _, section := range sections {
+		total += len(section.entries)
+	}
+	return total
 }
 
 func (e *editor) recentStyle(style tcell.Style, rank, total int) tcell.Style {

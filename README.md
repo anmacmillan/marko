@@ -120,7 +120,7 @@ Press `Ctrl-G` to cycle and remember themes. `matrix` is the phosphor terminal-f
 
 Press `F4` to open the Marko home screen from any document. Use Up/Down and Enter to choose New document, Open path, Recent files, Theme, Return to document, or Quit. `Esc` returns to the current document.
 
-Recent files are grouped by age in the recent picker: past 48 hours, past week, and older.
+Recent files are grouped by age on the home screen and in the recent picker: past 48 hours, past week, older, and older than 2 weeks.
 
 Open and Save As prompts prioritize zoxide shortcuts, then fall back to ordinary paths. For an untitled note, Save As starts with `untitled.md` selected, so typing immediately replaces it. Type a zoxide query and press `Tab` to expand it before entering the filename:
 
