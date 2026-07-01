@@ -2040,6 +2040,11 @@ func (e *editor) draw() {
 	if e.prompt != "" {
 		e.screen.ShowCursor(1+runeLen(e.prompt)+e.promptCursor, h-1)
 	} else {
+		if e.showStartMenu || e.showRecent || e.showHelp {
+			e.screen.HideCursor()
+			e.screen.Show()
+			return
+		}
 		vr := rows[cursorRow]
 		if cursorRow >= e.top && cursorRow < e.top+bodyH {
 			e.screen.ShowCursor(left+e.x-vr.start, cursorRow-e.top)
@@ -2268,9 +2273,9 @@ func (e *editor) drawRecent(w, h int) {
 		lines = append(lines, prefix+path)
 	}
 	if len(e.recent) == 0 {
-		lines = append(lines, "  No recent files")
+		lines = append(lines, "  <No recent files>")
 	}
-	lines = append(lines, " Up/Down select   Enter open   Esc cancel ")
+	lines = append(lines, " Up/Down select   Enter open ", " Esc cancel ")
 	width := 0
 	for _, line := range lines {
 		width = max(width, min(runeLen(line), max(20, w-6)))

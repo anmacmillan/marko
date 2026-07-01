@@ -1964,6 +1964,34 @@ func TestStartMenuCanShowHelpOverlay(t *testing.T) {
 	}
 }
 
+func TestRecentPanelUsesBracketedEmptyStateAndSplitFooter(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(80, 16)
+	e := &editor{
+		screen:     screen,
+		lines:      []string{"x"},
+		theme:      themeByName("calm"),
+		showRecent: true,
+	}
+	e.draw()
+	var rendered strings.Builder
+	for row := 0; row < 16; row++ {
+		rendered.WriteString(simulationLine(screen, row, 80))
+		rendered.WriteByte('\n')
+	}
+	text := rendered.String()
+	if !strings.Contains(text, "<No recent files>") {
+		t.Fatalf("recent panel empty state missing:\n%s", text)
+	}
+	if !strings.Contains(text, "Up/Down select   Enter open") || !strings.Contains(text, "Esc cancel") {
+		t.Fatalf("recent panel footer not split across lines:\n%s", text)
+	}
+}
+
 func TestStartMenuTickDoesNotAutosave(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "note.md")
