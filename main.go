@@ -2786,7 +2786,7 @@ func (e *editor) drawLine(left, row, y int, line string, current bool, width int
 		if !e.focusMode {
 			switch level {
 			case 1:
-				style = style.Bold(true).Underline(true).Foreground(e.theme.heading1)
+				style = style.Bold(true).Foreground(e.theme.heading1)
 			case 2:
 				style = style.Bold(true).Foreground(e.theme.heading2)
 			default:

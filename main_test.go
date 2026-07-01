@@ -730,6 +730,35 @@ func TestCurrentHeadingHidesMarker(t *testing.T) {
 	}
 }
 
+func TestHeadingOneUsesBoldWithoutUnderline(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(90, 3)
+	e := &editor{
+		screen: screen,
+		lines:  []string{"# Heading one"},
+		theme:  themeByName("ember"),
+	}
+	e.drawLine(0, 0, 0, e.lines[0], false, 90)
+	mainc, _, style, _ := screen.GetContent(0, 0)
+	if mainc != 'H' {
+		t.Fatalf("heading text = %q, want H", mainc)
+	}
+	fg, _, attrs := style.Decompose()
+	if fg != e.theme.heading1 {
+		t.Fatalf("heading foreground = %v, want %v", fg, e.theme.heading1)
+	}
+	if attrs&tcell.AttrBold == 0 {
+		t.Fatal("heading one did not render bold")
+	}
+	if attrs&tcell.AttrUnderline != 0 {
+		t.Fatal("heading one should not be underlined")
+	}
+}
+
 func TestModifiedRuneDoesNotReplaceSelection(t *testing.T) {
 	for _, mod := range []tcell.ModMask{tcell.ModAlt, tcell.ModMeta, tcell.ModHyper} {
 		e := &editor{
