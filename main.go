@@ -919,10 +919,7 @@ func (e *editor) submitPrompt() {
 		e.status = "Enter a filename"
 		return
 	}
-	if filepath.Ext(path) == "" {
-		path += ".md"
-	}
-	expanded, err := expandPathInput(path)
+	expanded, err := e.expandSavePathInput(path)
 	if err != nil {
 		e.status = err.Error()
 		return
@@ -933,6 +930,30 @@ func (e *editor) submitPrompt() {
 	e.modTime = time.Time{}
 	e.prompt, e.promptValue, e.promptCursor = "", "", 0
 	e.save()
+}
+
+func (e *editor) expandSavePathInput(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if strings.HasPrefix(path, "z ") {
+		query, rest := splitZoxideInput(strings.TrimSpace(strings.TrimPrefix(path, "z ")))
+		if rest == "" {
+			rest = e.defaultSaveName()
+		} else if filepath.Ext(rest) == "" {
+			rest += ".md"
+		}
+		return expandZoxidePath(query + "/" + rest)
+	}
+	if filepath.Ext(path) == "" {
+		path += ".md"
+	}
+	return expandPathInput(path)
+}
+
+func (e *editor) defaultSaveName() string {
+	if e.path != "" && !e.untitled {
+		return filepath.Base(e.path)
+	}
+	return "untitled.md"
 }
 
 func (e *editor) startMenuKey(ev *tcell.EventKey) bool {

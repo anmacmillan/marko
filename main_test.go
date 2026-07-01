@@ -865,6 +865,29 @@ func TestSavePromptExpandsHomeDirectory(t *testing.T) {
 	}
 }
 
+func TestSavePromptExpandsBareZoxideQueryWithDefaultName(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "zoxide")
+	target := filepath.Join(dir, "target")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\nif [ \"$1\" = query ] && [ \"$2\" = briefs ]; then printf '%s\\n' '" + target + "'; exit 0; fi\nexit 1\n"
+	if err := os.WriteFile(bin, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	e := &editor{lines: []string{"hello"}, prompt: "Save as: ", promptValue: "z briefs", untitled: true}
+	e.promptKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	want := filepath.Join(target, "untitled.md")
+	if e.path != want {
+		t.Fatalf("path = %q, want %q", e.path, want)
+	}
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("saved file missing: %v", err)
+	}
+}
+
 func TestPromptSupportsMiddleEditing(t *testing.T) {
 	e := &editor{prompt: "Save as: ", promptValue: "untitled.md", promptCursor: runeLen("untitled.md")}
 	e.promptKey(tcell.NewEventKey(tcell.KeyHome, 0, tcell.ModNone))
