@@ -560,6 +560,14 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		e.recentKey(ev)
 		return false
 	}
+	if e.prompt != "" && eventKey(ev) == tcell.KeyCtrlQ {
+		if e.dirty && !e.confirmQuit {
+			e.status = "Unsaved changes. Press Ctrl-Q again to quit."
+			e.confirmQuit = true
+			return false
+		}
+		return true
+	}
 	if e.prompt != "" {
 		e.promptKey(ev)
 		return false

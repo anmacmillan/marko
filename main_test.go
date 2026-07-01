@@ -2096,6 +2096,18 @@ func TestCtrlKTogglesFocusWhilePromptOpen(t *testing.T) {
 	}
 }
 
+func TestCtrlQQuitsWhilePromptOpen(t *testing.T) {
+	e := &editor{
+		lines:        []string{"hello"},
+		prompt:       "Save as: ",
+		promptValue:  "untitled.md",
+		promptCursor: runeLen("untitled.md"),
+	}
+	if !e.key(tcell.NewEventKey(tcell.KeyCtrlQ, 0, tcell.ModCtrl)) {
+		t.Fatal("Ctrl-Q did not quit while prompt was open")
+	}
+}
+
 func TestNamedSaveDoesNotPrompt(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "named.md")
