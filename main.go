@@ -48,6 +48,7 @@ type editor struct {
 	showCoach       bool
 	coachUntil      time.Time
 	showStartMenu   bool
+	startMenuIndex  int
 	showRecent      bool
 	recent          []string
 	recentIndex     int
@@ -585,6 +586,8 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		e.openSaveAsPrompt()
 	case tcell.KeyF3:
 		e.openRecentFiles()
+	case tcell.KeyF4:
+		e.openStartMenu()
 	case tcell.KeyCtrlG:
 		e.cycleTheme()
 	case tcell.KeyCtrlL:
@@ -825,7 +828,12 @@ func (e *editor) promptKey(ev *tcell.EventKey) {
 				e.status = "Enter a filename"
 				return
 			}
-			e.openFile(expandUserPath(path))
+			expanded, err := expandPathInput(path)
+			if err != nil {
+				e.status = err.Error()
+				return
+			}
+			e.openFile(expanded)
 			return
 		}
 		path := strings.TrimSpace(e.promptValue)
@@ -836,7 +844,12 @@ func (e *editor) promptKey(ev *tcell.EventKey) {
 		if filepath.Ext(path) == "" {
 			path += ".md"
 		}
-		e.path = expandUserPath(path)
+		expanded, err := expandPathInput(path)
+		if err != nil {
+			e.status = err.Error()
+			return
+		}
+		e.path = expanded
 		e.untitled = false
 		e.conflict = false
 		e.modTime = time.Time{}
@@ -867,34 +880,105 @@ func (e *editor) promptKey(ev *tcell.EventKey) {
 
 func (e *editor) startMenuKey(ev *tcell.EventKey) bool {
 	switch eventKey(ev) {
+	case tcell.KeyEsc:
+		e.showStartMenu = false
 	case tcell.KeyCtrlQ:
 		return true
 	case tcell.KeyF1:
 		e.showHelp = !e.showHelp
 	case tcell.KeyF3:
-		e.openRecentFiles()
-		e.showStartMenu = false
+		e.activateStartMenuAction("recent")
+	case tcell.KeyUp:
+		e.moveStartMenuSelection(-1)
+	case tcell.KeyDown:
+		e.moveStartMenuSelection(1)
 	case tcell.KeyEnter:
-		if len(e.recent) > 0 {
-			e.showStartMenu = false
-			e.openFile(e.recent[0])
-		} else {
-			e.newUntitledDocument()
-		}
+		return e.activateStartMenuAction(e.startMenuItems()[e.startMenuIndex].action)
 	case tcell.KeyRune:
 		switch strings.ToLower(string(ev.Rune())) {
 		case "n":
-			e.newUntitledDocument()
+			e.activateStartMenuAction("new")
 		case "o":
-			e.showStartMenu = false
-			e.prompt = "Open path: "
-			e.promptValue = ""
+			e.activateStartMenuAction("open")
 		case "r":
-			e.openRecentFiles()
-			e.showStartMenu = false
+			e.activateStartMenuAction("recent")
+		case "t":
+			e.activateStartMenuAction("theme")
 		case "q":
 			return true
 		}
+	}
+	return false
+}
+
+type startMenuItem struct {
+	label  string
+	action string
+}
+
+func (e *editor) openStartMenu() {
+	if e.dirty && !e.untitled && e.path != "" {
+		e.save()
+	}
+	e.recent = loadRecent()
+	e.showStartMenu = true
+	e.showRecent = false
+	e.showHelp = false
+	e.prompt, e.promptValue = "", ""
+	e.startMenuIndex = 0
+}
+
+func (e *editor) startMenuItems() []startMenuItem {
+	items := []startMenuItem{
+		{label: "[N] New document", action: "new"},
+		{label: "[O] Open path...", action: "open"},
+		{label: "[R] Recent files", action: "recent"},
+		{label: "[T] Theme: " + e.displayThemeName(), action: "theme"},
+	}
+	for _, path := range e.recent {
+		items = append(items, startMenuItem{label: "    " + path, action: "open:" + path})
+	}
+	items = append(items, startMenuItem{label: "Return to document", action: "return"})
+	items = append(items, startMenuItem{label: "[Q] Quit", action: "quit"})
+	return items
+}
+
+func (e *editor) displayThemeName() string {
+	if e.themeName != "" {
+		return e.themeName
+	}
+	return selectedThemeName()
+}
+
+func (e *editor) moveStartMenuSelection(delta int) {
+	items := e.startMenuItems()
+	if len(items) == 0 {
+		e.startMenuIndex = 0
+		return
+	}
+	e.startMenuIndex = (e.startMenuIndex + delta + len(items)) % len(items)
+}
+
+func (e *editor) activateStartMenuAction(action string) bool {
+	switch {
+	case action == "new":
+		e.newUntitledDocument()
+	case action == "open":
+		e.showStartMenu = false
+		e.prompt = "Open path: "
+		e.promptValue = ""
+	case action == "recent":
+		e.openRecentFiles()
+		e.showStartMenu = false
+	case action == "theme":
+		e.cycleTheme()
+	case strings.HasPrefix(action, "open:"):
+		e.showStartMenu = false
+		e.openFile(strings.TrimPrefix(action, "open:"))
+	case action == "return":
+		e.showStartMenu = false
+	case action == "quit":
+		return true
 	}
 	return false
 }
@@ -938,6 +1022,49 @@ func expandUserPath(path string) string {
 		}
 	}
 	return path
+}
+
+func expandPathInput(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if strings.HasPrefix(path, "z ") {
+		return expandZoxidePath(strings.TrimSpace(strings.TrimPrefix(path, "z ")))
+	}
+	return expandUserPath(path), nil
+}
+
+func expandZoxidePath(input string) (string, error) {
+	if input == "" {
+		return "", fmt.Errorf("Enter a zoxide query")
+	}
+	query, rest := splitZoxideInput(input)
+	if query == "" {
+		return "", fmt.Errorf("Enter a zoxide query")
+	}
+	zoxide, err := exec.LookPath("zoxide")
+	if err != nil {
+		return "", fmt.Errorf("zoxide not found")
+	}
+	out, err := exec.Command(zoxide, "query", query).Output()
+	if err != nil {
+		return "", fmt.Errorf("zoxide match not found: %s", query)
+	}
+	base := strings.TrimSpace(string(out))
+	if base == "" {
+		return "", fmt.Errorf("zoxide match not found: %s", query)
+	}
+	if rest == "" {
+		return base, nil
+	}
+	return filepath.Join(base, rest), nil
+}
+
+func splitZoxideInput(input string) (string, string) {
+	input = strings.Trim(input, "/")
+	parts := strings.Split(input, "/")
+	if len(parts) == 1 {
+		return parts[0], ""
+	}
+	return parts[0], filepath.Join(parts[1:]...)
 }
 
 func (e *editor) checkpoint() {
@@ -1938,6 +2065,7 @@ func (e *editor) drawHelp(w, h int) {
 		"Ctrl-S           Save",
 		"F2 / Ctrl-Shift-S Save As",
 		"F3 / Ctrl-Shift-E Recent files",
+		"F4               Home screen",
 		"Ctrl-Q           Quit",
 		"Ctrl-A           Select all",
 		"Shift-arrows     Select text",
@@ -1954,6 +2082,7 @@ func (e *editor) drawHelp(w, h int) {
 		"Ctrl-K           Focus mode",
 		"Ctrl-Shift-E     Recent files",
 		"Ctrl-G           Cycle theme",
+		"Open/Save path   Use z query/file.md for zoxide",
 	}
 	width := 0
 	for _, line := range lines {
@@ -2000,18 +2129,19 @@ func (e *editor) drawStartMenu(w, h int) {
 		" MARKO ",
 		"Markdown focus",
 		"",
-		"[N] New document",
-		"",
-		"Recent files",
 	}
-	if len(e.recent) == 0 {
-		lines = append(lines, "  No recent files")
-	} else {
-		for _, path := range e.recent {
-			lines = append(lines, "  "+path)
+	items := e.startMenuItems()
+	if e.startMenuIndex < 0 || e.startMenuIndex >= len(items) {
+		e.startMenuIndex = 0
+	}
+	for i, item := range items {
+		prefix := "  "
+		if i == e.startMenuIndex {
+			prefix = "> "
 		}
+		lines = append(lines, prefix+item.label)
 	}
-	lines = append(lines, "", "[O] Open path...", "F1 help   F3 recent   Q quit")
+	lines = append(lines, "", "Up/Down select   Enter open   Esc return", "F1 help   F3 recent   F4 home")
 	width := 0
 	for _, line := range lines {
 		width = max(width, min(runeLen(line), max(20, w-8)))
@@ -2029,6 +2159,8 @@ func (e *editor) drawStartMenu(w, h int) {
 		style := box
 		if row == 0 {
 			style = style.Bold(true)
+		} else if strings.HasPrefix(line, "> ") {
+			style = e.selectedStyle(style)
 		}
 		e.put(x+2, y+1+row, line, style, min(w, x+2+width))
 	}

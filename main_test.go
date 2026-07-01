@@ -1661,6 +1661,70 @@ func TestStartMenuKeyActions(t *testing.T) {
 	}
 }
 
+func TestF4OpensStartMenuFromDocument(t *testing.T) {
+	e := &editor{lines: []string{"x"}, path: "note.md", theme: themeByName("calm")}
+	e.key(tcell.NewEventKey(tcell.KeyF4, 0, tcell.ModNone))
+	if !e.showStartMenu {
+		t.Fatal("F4 did not open start menu")
+	}
+	if e.startMenuIndex != 0 {
+		t.Fatalf("startMenuIndex = %d, want 0", e.startMenuIndex)
+	}
+}
+
+func TestStartMenuArrowSelectionAndEnter(t *testing.T) {
+	e := &editor{lines: []string{"x"}, path: "note.md", theme: themeByName("calm"), showStartMenu: true}
+	e.key(tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone))
+	if e.startMenuIndex != 1 {
+		t.Fatalf("startMenuIndex after down = %d, want 1", e.startMenuIndex)
+	}
+	e.key(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	if e.prompt != "Open path: " {
+		t.Fatalf("selected Open path prompt = %q, want Open path: ", e.prompt)
+	}
+}
+
+func TestStartMenuEscapeReturnsToDocument(t *testing.T) {
+	e := &editor{lines: []string{"x"}, path: "note.md", theme: themeByName("calm"), showStartMenu: true}
+	e.key(tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone))
+	if e.showStartMenu {
+		t.Fatal("Esc did not close start menu")
+	}
+	if e.lines[0] != "x" {
+		t.Fatalf("document changed after Esc: %#v", e.lines)
+	}
+}
+
+func TestStartMenuThemeActionCyclesTheme(t *testing.T) {
+	e := &editor{lines: []string{"x"}, themeName: "matrix", theme: themeByName("matrix"), showStartMenu: true}
+	e.startMenuIndex = 3
+	e.key(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	if e.themeName != "midnight" {
+		t.Fatalf("themeName = %q, want midnight", e.themeName)
+	}
+	if !e.showStartMenu {
+		t.Fatal("theme action should keep start menu open")
+	}
+}
+
+func TestZoxidePathExpansion(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "zoxide")
+	script := "#!/bin/sh\nif [ \"$1\" = query ] && [ \"$2\" = briefs ]; then printf '%s\\n' '" + dir + "'; exit 0; fi\nexit 1\n"
+	if err := os.WriteFile(bin, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	got, err := expandPathInput("z briefs/draft")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(dir, "draft")
+	if got != want {
+		t.Fatalf("expandPathInput = %q, want %q", got, want)
+	}
+}
+
 func TestStartMenuCanShowHelpOverlay(t *testing.T) {
 	screen := tcell.NewSimulationScreen("UTF-8")
 	if err := screen.Init(); err != nil {

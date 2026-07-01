@@ -58,6 +58,7 @@ Marko works perfectly alongside external automations, scripts, or AI assistants.
 |---|---|
 | `F1` | Show shortcut help |
 | `Ctrl-S` / `F2` / `Ctrl-Shift-S` | Save / Save As (first save of an untitled doc always asks for a name) |
+| `F4` | Open the Marko home screen |
 | `Ctrl-B` | Bold (`**…**`) — wrap/unwrap selection, or insert empty markers |
 | `Ctrl-E` | Italic (`*…*`) — wrap/unwrap selection, or insert empty markers |
 | `Ctrl-U` | Underline (`<u>…</u>`) — wrap/unwrap selection, or insert empty markers |
@@ -109,6 +110,18 @@ MARKO_THEME=light marko document.md
 ```
 
 Press `Ctrl-G` to cycle and remember themes. `matrix` is the phosphor terminal-focus palette; `midnight` is a quiet dark writing palette; `paper` is warm and bright; `ember` is a warmer evening dark theme. Marko inherits your terminal font; for a warmer writing feel, try Berkeley Mono, iA Writer Mono, or Atkinson Hyperlegible Mono in your terminal settings.
+
+## Home Screen And Paths
+
+Press `F4` to open the Marko home screen from any document. Use Up/Down and Enter to choose New document, Open path, Recent files, Theme, Return to document, or Quit. `Esc` returns to the current document.
+
+Open and Save As prompts accept ordinary paths, `~/...`, and zoxide shortcuts:
+
+```text
+z briefs/draft.md
+```
+
+That expands `briefs` through `zoxide query briefs`, then appends `draft.md`.
 
 ## Philosophy
 
