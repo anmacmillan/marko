@@ -1855,6 +1855,34 @@ func TestShortcutCoachExpiresAfterFiveSeconds(t *testing.T) {
 	}
 }
 
+func TestStartMenuCanRenderStartupCoach(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(80, 18)
+	e := &editor{
+		screen:        screen,
+		lines:         []string{""},
+		theme:         themeByName("calm"),
+		showStartMenu: true,
+		showCoach:     true,
+	}
+	e.draw()
+	var rendered strings.Builder
+	for row := 0; row < 18; row++ {
+		rendered.WriteString(simulationLine(screen, row, 80))
+		rendered.WriteByte('\n')
+	}
+	text := rendered.String()
+	for _, want := range []string{"MARKO", "F2 save as", "New document", "Open path"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("startup coach/start menu did not render %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestStartMenuRendersNewRecentAndOpenPath(t *testing.T) {
 	screen := tcell.NewSimulationScreen("UTF-8")
 	if err := screen.Init(); err != nil {
@@ -1988,6 +2016,74 @@ func TestOpenPathBareZoxideDirectoryCreatesUntitledInDirectory(t *testing.T) {
 	}
 	if e.status != "New file "+want {
 		t.Fatalf("status = %q, want New file %q", e.status, want)
+	}
+}
+
+func TestSavePromptTabCompletesZoxideDirectory(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "zoxide")
+	target := filepath.Join(dir, "target")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\nif [ \"$1\" = query ] && [ \"$2\" = briefs ]; then printf '%s\\n' '" + target + "'; exit 0; fi\nexit 1\n"
+	if err := os.WriteFile(bin, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	e := &editor{lines: []string{"hello"}, prompt: "Save as: ", promptValue: "z briefs", promptCursor: runeLen("z briefs")}
+	e.promptKey(tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone))
+	want := target + string(os.PathSeparator)
+	if e.promptValue != want {
+		t.Fatalf("promptValue = %q, want %q", e.promptValue, want)
+	}
+	if e.promptCursor != runeLen(want) {
+		t.Fatalf("promptCursor = %d, want %d", e.promptCursor, runeLen(want))
+	}
+	if !strings.Contains(e.status, "Completed zoxide") {
+		t.Fatalf("status = %q, want zoxide completion", e.status)
+	}
+	e.promptKey(tcell.NewEventKey(tcell.KeyRune, 'n', 0))
+	e.promptKey(tcell.NewEventKey(tcell.KeyRune, 'o', 0))
+	e.promptKey(tcell.NewEventKey(tcell.KeyRune, 't', 0))
+	e.promptKey(tcell.NewEventKey(tcell.KeyRune, 'e', 0))
+	e.promptKey(tcell.NewEventKey(tcell.KeyLeft, 0, tcell.ModNone))
+	e.promptKey(tcell.NewEventKey(tcell.KeyRune, 'X', 0))
+	want = target + string(os.PathSeparator) + "notXe"
+	if e.promptValue != want {
+		t.Fatalf("edited promptValue = %q, want %q", e.promptValue, want)
+	}
+}
+
+func TestOpenPromptTabCompletesZoxideWithFilename(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "zoxide")
+	target := filepath.Join(dir, "target")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\nif [ \"$1\" = query ] && [ \"$2\" = briefs ]; then printf '%s\\n' '" + target + "'; exit 0; fi\nexit 1\n"
+	if err := os.WriteFile(bin, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	e := &editor{lines: []string{""}, prompt: "Open path: ", promptValue: "z briefs/draft", promptCursor: runeLen("z briefs/draft")}
+	e.promptKey(tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone))
+	want := filepath.Join(target, "draft.md")
+	if e.promptValue != want {
+		t.Fatalf("promptValue = %q, want %q", e.promptValue, want)
+	}
+	if e.promptCursor != runeLen(want) {
+		t.Fatalf("promptCursor = %d, want %d", e.promptCursor, runeLen(want))
+	}
+}
+
+func TestTerminalTitleUsesMarkoAndFilename(t *testing.T) {
+	if got, want := terminalTitle("/tmp/note.md", false), "Marko - note.md"; got != want {
+		t.Fatalf("terminalTitle = %q, want %q", got, want)
+	}
+	if got, want := terminalTitle("", true), "Marko - Untitled *"; got != want {
+		t.Fatalf("terminalTitle untitled = %q, want %q", got, want)
 	}
 }
 
@@ -2262,6 +2358,13 @@ func TestUntitledSavePrompts(t *testing.T) {
 	if e.promptValue != "untitled.md" {
 		t.Fatalf("untitled Ctrl-S promptValue = %q, want untitled.md", e.promptValue)
 	}
+	if !e.promptSelectAll {
+		t.Fatal("untitled Ctrl-S did not select the dummy filename")
+	}
+	e.key(tcell.NewEventKey(tcell.KeyRune, 'z', 0))
+	if e.promptValue != "z" || e.promptCursor != 1 || e.promptSelectAll {
+		t.Fatalf("typing did not replace selected dummy: value=%q cursor=%d selected=%v", e.promptValue, e.promptCursor, e.promptSelectAll)
+	}
 }
 
 func TestSavePromptShowsZoxideHint(t *testing.T) {
@@ -2280,7 +2383,7 @@ func TestSavePromptShowsZoxideHint(t *testing.T) {
 	}
 	e.draw()
 	got := simulationLine(screen, 2, 80)
-	if !strings.Contains(got, "[z query/file.md, or type a path]") {
+	if !strings.Contains(got, "[type z folder, press Tab, then filename]") {
 		t.Fatalf("save prompt hint missing: %q", got)
 	}
 }
@@ -2327,6 +2430,53 @@ func TestCtrlSSubmitsSavePrompt(t *testing.T) {
 	}
 	if got, want := string(data), "hello"; got != want {
 		t.Fatalf("Ctrl-S save wrote %q, want %q", got, want)
+	}
+}
+
+func TestCtrlSShowsSavedStatusInFocusMode(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "note.md")
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(80, 4)
+	e := &editor{
+		screen:    screen,
+		lines:     []string{"hello"},
+		path:      path,
+		theme:     themeByName("calm"),
+		focusMode: true,
+		dirty:     true,
+	}
+	e.key(tcell.NewEventKey(tcell.KeyCtrlS, 0, tcell.ModCtrl))
+	e.draw()
+	got := simulationLine(screen, 3, 80)
+	if !strings.Contains(got, "Saved ") {
+		t.Fatalf("focus-mode Ctrl-S did not show saved status: %q", got)
+	}
+}
+
+func TestCtrlShiftSShowsSaveAsPromptInFocusMode(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(80, 4)
+	e := &editor{
+		screen:    screen,
+		lines:     []string{"hello"},
+		path:      "note.md",
+		theme:     themeByName("calm"),
+		focusMode: true,
+	}
+	e.key(tcell.NewEventKey(tcell.KeyCtrlS, 0, tcell.ModCtrl|tcell.ModShift))
+	e.draw()
+	got := simulationLine(screen, 3, 80)
+	if !strings.Contains(got, "Save as: note.md") {
+		t.Fatalf("focus-mode Ctrl-Shift-S did not show Save As prompt: %q", got)
 	}
 }
 

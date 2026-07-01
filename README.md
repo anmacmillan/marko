@@ -57,7 +57,7 @@ Marko works perfectly alongside external automations, scripts, or AI assistants.
 | Key | Action |
 |---|---|
 | `F1` | Show shortcut help |
-| `Ctrl-S` / `F2` / `Ctrl-Shift-S` | Save / Save As (first save of an untitled doc always asks for a name) |
+| `Ctrl-S` / `F2` / `Ctrl-Shift-S` | Save / Save As (first save of an untitled doc always asks for a name; save status flashes in focus mode) |
 | `F4` | Open the Marko home screen |
 | `Ctrl-B` | Bold (`**…**`) — wrap/unwrap selection, or insert empty markers |
 | `Ctrl-E` | Italic (`*…*`) — wrap/unwrap selection, or insert empty markers |
@@ -122,13 +122,20 @@ Press `F4` to open the Marko home screen from any document. Use Up/Down and Ente
 
 Recent files are grouped by age in the recent picker: past 48 hours, past week, and older.
 
-Open and Save As prompts prioritize zoxide shortcuts, then fall back to ordinary paths:
+Open and Save As prompts prioritize zoxide shortcuts, then fall back to ordinary paths. For an untitled note, Save As starts with `untitled.md` selected, so typing immediately replaces it. Type a zoxide query and press `Tab` to expand it before entering the filename:
+
+```text
+z briefs<Tab>
+/Users/you/Documents/Briefs/
+```
+
+Then type the filename and press `Enter`. You can also type it in one go:
 
 ```text
 z briefs/draft.md
 ```
 
-That expands `briefs` through `zoxide query briefs`, then appends `draft.md`.
+That expands `briefs` through `zoxide query briefs`, then opens or saves `draft.md` in that directory. If the completed path is a directory, Marko uses `untitled.md`.
 
 ## Philosophy
 

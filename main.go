@@ -21,11 +21,13 @@ type editor struct {
 	x, y, top       int
 	dirty           bool
 	status          string
+	statusUntil     time.Time
 	confirmQuit     bool
 	preferredX      int
 	prompt          string
 	promptValue     string
 	promptCursor    int
+	promptSelectAll bool
 	lastEdit        time.Time
 	recovery        string
 	theme           theme
@@ -142,7 +144,8 @@ func newEditor(path string, untitled bool) (*editor, error) {
 	status := "F1 shortcuts · F5/F6/F7 headings · Ctrl-A select all · Ctrl-C copy · Ctrl-S save"
 	themeName := selectedThemeName()
 	now := time.Now()
-	e := &editor{screen: s, path: path, untitled: untitled, lines: lines, status: status, themeName: themeName, theme: themeByName(themeName), lastAction: now, focusMode: true, modTime: modTime, showCoach: !untitled, coachUntil: now.Add(5 * time.Second), showStartMenu: untitled}
+	e := &editor{screen: s, path: path, untitled: untitled, lines: lines, status: status, themeName: themeName, theme: themeByName(themeName), lastAction: now, focusMode: true, modTime: modTime, showCoach: true, coachUntil: now.Add(3 * time.Second), showStartMenu: untitled}
+	e.updateTerminalTitle()
 	if !untitled {
 		e.rememberRecent(path)
 	} else {
@@ -153,6 +156,39 @@ func newEditor(path string, untitled bool) (*editor, error) {
 
 func datedUntitledPath(now time.Time) string {
 	return now.Format("20060102") + "_untitled.md"
+}
+
+func terminalTitle(path string, dirty bool) string {
+	name := filepath.Base(path)
+	if path == "" || name == "." || name == string(filepath.Separator) {
+		name = "Untitled"
+	}
+	title := "Marko - " + name
+	if dirty {
+		title += " *"
+	}
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case '\a', '\x1b', '\n', '\r':
+			return -1
+		default:
+			return r
+		}
+	}, title)
+}
+
+func setTerminalTitle(title string) {
+	if title == "" {
+		return
+	}
+	if strings.HasSuffix(os.Args[0], ".test") {
+		return
+	}
+	fmt.Fprintf(os.Stdout, "\033]0;%s\a", title)
+}
+
+func (e *editor) updateTerminalTitle() {
+	setTerminalTitle(terminalTitle(e.path, e.dirty))
 }
 
 func uniqueUntitledPath(now time.Time, dir string) string {
@@ -325,6 +361,9 @@ func (e *editor) run() {
 func (e *editor) tick() {
 	if e.showCoach && !e.coachUntil.IsZero() && time.Now().After(e.coachUntil) {
 		e.showCoach = false
+	}
+	if !e.statusUntil.IsZero() && time.Now().After(e.statusUntil) {
+		e.statusUntil = time.Time{}
 	}
 	if e.showStartMenu {
 		return
@@ -807,6 +846,7 @@ func (e *editor) openFile(path string) {
 	}
 	e.rememberRecent(path)
 	e.status = "Opened " + path
+	e.updateTerminalTitle()
 }
 
 func (e *editor) cycleTheme() {
@@ -829,7 +869,7 @@ func (e *editor) cycleTheme() {
 func (e *editor) promptKey(ev *tcell.EventKey) {
 	switch eventKey(ev) {
 	case tcell.KeyEsc:
-		e.prompt, e.promptValue, e.promptCursor = "", "", 0
+		e.prompt, e.promptValue, e.promptCursor, e.promptSelectAll = "", "", 0, false
 		e.status = "Cancelled"
 	case tcell.KeyCtrlK:
 		e.focusMode = !e.focusMode
@@ -837,24 +877,46 @@ func (e *editor) promptKey(ev *tcell.EventKey) {
 		e.submitPrompt()
 	case tcell.KeyCtrlS:
 		e.submitPrompt()
+	case tcell.KeyTab:
+		e.completePromptPath()
 	case tcell.KeyLeft:
+		if e.promptSelectAll {
+			e.promptSelectAll = false
+			e.promptCursor = 0
+			return
+		}
 		if e.promptCursor > 0 {
 			e.promptCursor--
 		}
 	case tcell.KeyRight:
+		if e.promptSelectAll {
+			e.promptSelectAll = false
+			e.promptCursor = runeLen(e.promptValue)
+			return
+		}
 		if e.promptCursor < runeLen(e.promptValue) {
 			e.promptCursor++
 		}
 	case tcell.KeyHome:
+		e.promptSelectAll = false
 		e.promptCursor = 0
 	case tcell.KeyEnd:
+		e.promptSelectAll = false
 		e.promptCursor = runeLen(e.promptValue)
 	case tcell.KeyDelete:
+		if e.promptSelectAll {
+			e.promptValue, e.promptCursor, e.promptSelectAll = "", 0, false
+			return
+		}
 		r := []rune(e.promptValue)
 		if e.promptCursor < len(r) {
 			e.promptValue = string(r[:e.promptCursor]) + string(r[e.promptCursor+1:])
 		}
 	case tcell.KeyBackspace, tcell.KeyBackspace2:
+		if e.promptSelectAll {
+			e.promptValue, e.promptCursor, e.promptSelectAll = "", 0, false
+			return
+		}
 		r := []rune(e.promptValue)
 		if e.promptCursor > 0 && e.promptCursor <= len(r) {
 			e.promptValue = string(r[:e.promptCursor-1]) + string(r[e.promptCursor:])
@@ -866,10 +928,20 @@ func (e *editor) promptKey(ev *tcell.EventKey) {
 	case tcell.KeyCtrlA:
 		if e.prompt == "Replace with: " {
 			e.replace = e.promptValue
-			e.prompt, e.promptValue, e.promptCursor = "", "", 0
+			e.prompt, e.promptValue, e.promptCursor, e.promptSelectAll = "", "", 0, false
 			e.replaceAll()
 		}
 	case tcell.KeyRune:
+		if e.promptSelectAll {
+			e.promptValue = string(ev.Rune())
+			e.promptCursor = 1
+			e.promptSelectAll = false
+			if e.prompt == "Find: " {
+				e.search = e.promptValue
+				e.findFromStart()
+			}
+			return
+		}
 		r := []rune(e.promptValue)
 		insert := []rune{ev.Rune()}
 		e.promptValue = string(r[:e.promptCursor]) + string(insert) + string(r[e.promptCursor:])
@@ -884,24 +956,24 @@ func (e *editor) promptKey(ev *tcell.EventKey) {
 func (e *editor) submitPrompt() {
 	if e.prompt == "Find: " {
 		e.search = e.promptValue
-		e.prompt, e.promptValue, e.promptCursor = "", "", 0
+		e.prompt, e.promptValue, e.promptCursor, e.promptSelectAll = "", "", 0, false
 		e.findNext()
 		return
 	}
 	if e.prompt == "Replace with: " {
 		e.replace = e.promptValue
-		e.prompt, e.promptValue, e.promptCursor = "", "", 0
+		e.prompt, e.promptValue, e.promptCursor, e.promptSelectAll = "", "", 0, false
 		e.replaceCurrent()
 		return
 	}
 	if e.prompt == "Rename to: " {
 		e.renameFile(e.promptValue)
-		e.prompt, e.promptValue, e.promptCursor = "", "", 0
+		e.prompt, e.promptValue, e.promptCursor, e.promptSelectAll = "", "", 0, false
 		return
 	}
 	if e.prompt == "Open path: " {
 		path := strings.TrimSpace(e.promptValue)
-		e.prompt, e.promptValue, e.promptCursor = "", "", 0
+		e.prompt, e.promptValue, e.promptCursor, e.promptSelectAll = "", "", 0, false
 		if path == "" {
 			e.status = "Enter a filename"
 			return
@@ -928,8 +1000,57 @@ func (e *editor) submitPrompt() {
 	e.untitled = false
 	e.conflict = false
 	e.modTime = time.Time{}
-	e.prompt, e.promptValue, e.promptCursor = "", "", 0
+	e.prompt, e.promptValue, e.promptCursor, e.promptSelectAll = "", "", 0, false
 	e.save()
+}
+
+func (e *editor) completePromptPath() {
+	if e.prompt != "Save as: " && e.prompt != "Open path: " {
+		return
+	}
+	value, err := completeZoxidePromptValue(e.promptValue)
+	if err != nil {
+		e.status = err.Error()
+		return
+	}
+	if value == "" {
+		e.status = "Type z query, then Tab"
+		return
+	}
+	e.promptValue = value
+	e.promptCursor = runeLen(value)
+	e.promptSelectAll = false
+	e.status = "Completed zoxide path"
+}
+
+func completeZoxidePromptValue(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if !strings.HasPrefix(value, "z ") {
+		return "", nil
+	}
+	query, rest := splitZoxideInput(strings.TrimSpace(strings.TrimPrefix(value, "z ")))
+	if query == "" {
+		return "", fmt.Errorf("Enter a zoxide query")
+	}
+	base, err := expandZoxidePath(query)
+	if err != nil {
+		return "", err
+	}
+	if rest == "" {
+		return withTrailingSeparator(base), nil
+	}
+	if filepath.Ext(rest) == "" {
+		rest += ".md"
+	}
+	return filepath.Join(base, rest), nil
+}
+
+func withTrailingSeparator(path string) string {
+	sep := string(os.PathSeparator)
+	if strings.HasSuffix(path, sep) {
+		return path
+	}
+	return path + sep
 }
 
 func (e *editor) expandSavePathInput(path string) (string, error) {
@@ -984,9 +1105,16 @@ func (e *editor) newFileAt(path string) {
 	e.conflict = false
 	e.modTime = time.Time{}
 	e.status = "New file " + path
+	e.updateTerminalTitle()
 }
 
 func (e *editor) startMenuKey(ev *tcell.EventKey) bool {
+	if e.showCoach {
+		e.showCoach = false
+		if ev.Key() == tcell.KeyEsc {
+			return false
+		}
+	}
 	switch eventKey(ev) {
 	case tcell.KeyEsc:
 		e.showStartMenu = false
@@ -1103,16 +1231,24 @@ func (e *editor) newUntitledDocument() {
 	e.conflict = false
 	e.modTime = time.Time{}
 	e.status = "New document"
+	e.updateTerminalTitle()
 }
 
 func (e *editor) openSaveAsPrompt() {
 	e.prompt = "Save as: "
 	if e.untitled || e.path == "" {
 		e.promptValue = "untitled.md"
+		e.promptSelectAll = true
 	} else {
 		e.promptValue = e.path
+		e.promptSelectAll = false
 	}
 	e.promptCursor = runeLen(e.promptValue)
+	e.flashStatus()
+}
+
+func (e *editor) flashStatus() {
+	e.statusUntil = time.Now().Add(3 * time.Second)
 }
 
 func (e *editor) openRecentFiles() {
@@ -1951,6 +2087,8 @@ func (e *editor) save() {
 	e.status = "Saved " + e.path
 	e.rememberRecent(e.path)
 	_ = os.Remove(journalPath(e.path))
+	e.updateTerminalTitle()
+	e.flashStatus()
 }
 
 func (e *editor) reloadFile() {
@@ -2038,6 +2176,9 @@ func (e *editor) draw() {
 		if e.showHelp {
 			e.drawHelp(w, h)
 		}
+		if e.showCoach && !e.showHelp {
+			e.drawCoach(w, h)
+		}
 		e.screen.Show()
 		return
 	}
@@ -2088,10 +2229,12 @@ func (e *editor) draw() {
 	if e.prompt != "" {
 		status = " " + e.prompt + e.promptValue
 		if e.prompt == "Save as: " || e.prompt == "Open path: " {
-			status += "  [z query/file.md, or type a path]"
+			status += "  [type z folder, press Tab, then filename]"
 		}
+	} else if e.focusMode && !e.statusUntil.IsZero() {
+		status = " " + e.status
 	}
-	if !e.focusMode || e.prompt != "" {
+	if !e.focusMode || e.prompt != "" || !e.statusUntil.IsZero() {
 		e.put(0, h-1, status, tcell.StyleDefault.Background(e.theme.statusBG).Foreground(e.theme.statusFG), w)
 	}
 	if e.showHelp {
