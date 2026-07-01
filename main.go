@@ -533,6 +533,8 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		}
 	case tcell.KeyF2:
 		e.openSaveAsPrompt()
+	case tcell.KeyF3:
+		e.openRecentFiles()
 	case tcell.KeyCtrlG:
 		e.cycleTheme()
 	case tcell.KeyCtrlL:
@@ -542,9 +544,7 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		e.deleteLine()
 	case tcell.KeyCtrlE:
 		if ev.Modifiers()&tcell.ModShift != 0 {
-			e.recent = loadRecent()
-			e.recentIndex = 0
-			e.showRecent = true
+			e.openRecentFiles()
 		} else {
 			e.checkpoint()
 			e.toggleEmphasis("*", "*")
@@ -812,6 +812,12 @@ func (e *editor) openSaveAsPrompt() {
 	} else {
 		e.promptValue = e.path
 	}
+}
+
+func (e *editor) openRecentFiles() {
+	e.recent = loadRecent()
+	e.recentIndex = 0
+	e.showRecent = true
 }
 
 func expandUserPath(path string) string {
@@ -1817,6 +1823,7 @@ func (e *editor) drawHelp(w, h int) {
 		"F1               Close help",
 		"Ctrl-S           Save",
 		"F2 / Ctrl-Shift-S Save As",
+		"F3 / Ctrl-Shift-E Recent files",
 		"Ctrl-Q           Quit",
 		"Ctrl-A           Select all",
 		"Shift-arrows     Select text",
@@ -1851,7 +1858,7 @@ func (e *editor) drawHelp(w, h int) {
 func (e *editor) drawCoach(w, h int) {
 	lines := []string{
 		" Marko shortcuts ",
-		"Ctrl-A select all   Ctrl-C copy   Ctrl-H highlight",
+		"F2 save as   F3 recent   Ctrl-A select all",
 		"F1 more   Esc dismiss",
 	}
 	width := 0

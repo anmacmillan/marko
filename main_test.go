@@ -1450,6 +1450,14 @@ func TestF2OpensSaveAsPrompt(t *testing.T) {
 	}
 }
 
+func TestF3OpensRecentFiles(t *testing.T) {
+	e := &editor{lines: []string{"x"}}
+	e.key(tcell.NewEventKey(tcell.KeyF3, 0, tcell.ModNone))
+	if !e.showRecent {
+		t.Fatal("F3 did not open recent files")
+	}
+}
+
 func TestHelpRendersAlignedShortcutColumns(t *testing.T) {
 	screen := tcell.NewSimulationScreen("UTF-8")
 	if err := screen.Init(); err != nil {
@@ -1465,7 +1473,7 @@ func TestHelpRendersAlignedShortcutColumns(t *testing.T) {
 		rendered.WriteByte('\n')
 	}
 	text := rendered.String()
-	for _, want := range []string{"F2", "Save As", "Ctrl-Shift-S", "Select all"} {
+	for _, want := range []string{"F2", "Save As", "F3", "Recent files", "Ctrl-Shift-S", "Select all"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("help did not render %q:\n%s", want, text)
 		}
@@ -1497,7 +1505,7 @@ func TestShortcutCoachRendersStartupHint(t *testing.T) {
 		rendered.WriteByte('\n')
 	}
 	text := rendered.String()
-	for _, want := range []string{"Marko shortcuts", "Ctrl-A select all", "Ctrl-C copy", "Ctrl-H highlight", "F1 more"} {
+	for _, want := range []string{"Marko shortcuts", "F2 save as", "F3 recent", "Ctrl-A select all", "F1 more"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("shortcut coach did not render %q:\n%s", want, text)
 		}
