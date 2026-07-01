@@ -82,6 +82,8 @@ Marko works perfectly alongside external automations, scripts, or AI assistants.
 
 Download the appropriate binary from [GitHub Releases](https://github.com/anmacmillan/marko/releases), rename it to `marko`, make it executable, and place it on your `PATH`.
 
+If you installed from a GitHub release binary, run `marko update` to download and replace it with the latest release for your platform.
+
 Or build from source:
 
 ```sh

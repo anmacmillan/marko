@@ -2,9 +2,12 @@ package main
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -2323,3 +2326,72 @@ func TestNamedSaveDoesNotPrompt(t *testing.T) {
 		t.Fatalf("named Ctrl-S wrote %q, want %q", data, "x")
 	}
 }
+
+func TestPlatformAssetName(t *testing.T) {
+	tests := []struct {
+		goos, goarch string
+		want         string
+		ok           bool
+	}{
+		{"darwin", "arm64", "marko-darwin-arm64", true},
+		{"darwin", "amd64", "marko-darwin-amd64", true},
+		{"linux", "arm64", "marko-linux-arm64", true},
+		{"linux", "amd64", "marko-linux-amd64", true},
+		{"windows", "amd64", "marko-windows-amd64.exe", true},
+		{"plan9", "amd64", "", false},
+	}
+	for _, tc := range tests {
+		got, err := platformAssetName(tc.goos, tc.goarch)
+		if tc.ok {
+			if err != nil {
+				t.Fatalf("platformAssetName(%q, %q) error = %v", tc.goos, tc.goarch, err)
+			}
+			if got != tc.want {
+				t.Fatalf("platformAssetName(%q, %q) = %q, want %q", tc.goos, tc.goarch, got, tc.want)
+			}
+		} else if err == nil {
+			t.Fatalf("platformAssetName(%q, %q) = %q, want error", tc.goos, tc.goarch, got)
+		}
+	}
+}
+
+func TestUpdateMarkoFromDownloadsLatestRelease(t *testing.T) {
+	assetName, err := platformAssetName(runtimeGOOS(), runtimeGOARCH())
+	if err != nil {
+		t.Skip(err)
+	}
+	exeDir := t.TempDir()
+	exePath := filepath.Join(exeDir, "marko")
+	if err := os.WriteFile(exePath, []byte("old"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	want := []byte("new release binary")
+	var baseURL string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/anmacmillan/marko/releases/latest":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{"tag_name":"v9.9.9","assets":[{"name":%q,"browser_download_url":%q}]}`, assetName, baseURL+"/download/"+assetName)
+		case r.URL.Path == "/download/"+assetName:
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(want)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	baseURL = server.URL
+	if err := updateMarkoFrom(server.URL+"/repos/anmacmillan/marko/releases/latest", exePath); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(exePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("updated binary = %q, want %q", got, want)
+	}
+}
+
+func runtimeGOOS() string   { return runtime.GOOS }
+func runtimeGOARCH() string { return runtime.GOARCH }

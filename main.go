@@ -83,6 +83,13 @@ var themeNames = []string{"calm", "matrix", "midnight", "paper", "ember", "green
 const writingWidth = 88
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "update" {
+		if err := updateMarko(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 2 {
 		fmt.Fprintln(os.Stderr, "usage: marko [FILE.md]")
 		os.Exit(2)
