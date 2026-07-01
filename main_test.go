@@ -2110,6 +2110,28 @@ func TestPromptRendersInFocusMode(t *testing.T) {
 	}
 }
 
+func TestCtrlSSubmitsSavePrompt(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "note.md")
+	e := &editor{
+		lines:        []string{"hello"},
+		prompt:       "Save as: ",
+		promptValue:  path,
+		promptCursor: runeLen(path),
+	}
+	e.key(tcell.NewEventKey(tcell.KeyCtrlS, 0, tcell.ModCtrl))
+	if e.prompt != "" {
+		t.Fatalf("Ctrl-S left prompt open: %q", e.prompt)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(data), "hello"; got != want {
+		t.Fatalf("Ctrl-S save wrote %q, want %q", got, want)
+	}
+}
+
 func TestCtrlKTogglesFocusWhilePromptOpen(t *testing.T) {
 	e := &editor{
 		lines:        []string{"hello"},

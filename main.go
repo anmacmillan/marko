@@ -826,57 +826,9 @@ func (e *editor) promptKey(ev *tcell.EventKey) {
 	case tcell.KeyCtrlK:
 		e.focusMode = !e.focusMode
 	case tcell.KeyEnter:
-		if e.prompt == "Find: " {
-			e.search = e.promptValue
-			e.prompt, e.promptValue, e.promptCursor = "", "", 0
-			e.findNext()
-			return
-		}
-		if e.prompt == "Replace with: " {
-			e.replace = e.promptValue
-			e.prompt, e.promptValue, e.promptCursor = "", "", 0
-			e.replaceCurrent()
-			return
-		}
-		if e.prompt == "Rename to: " {
-			e.renameFile(e.promptValue)
-			e.prompt, e.promptValue, e.promptCursor = "", "", 0
-			return
-		}
-		if e.prompt == "Open path: " {
-			path := strings.TrimSpace(e.promptValue)
-			e.prompt, e.promptValue, e.promptCursor = "", "", 0
-			if path == "" {
-				e.status = "Enter a filename"
-				return
-			}
-			expanded, err := expandPathInput(path)
-			if err != nil {
-				e.status = err.Error()
-				return
-			}
-			e.openFile(expanded)
-			return
-		}
-		path := strings.TrimSpace(e.promptValue)
-		if path == "" {
-			e.status = "Enter a filename"
-			return
-		}
-		if filepath.Ext(path) == "" {
-			path += ".md"
-		}
-		expanded, err := expandPathInput(path)
-		if err != nil {
-			e.status = err.Error()
-			return
-		}
-		e.path = expanded
-		e.untitled = false
-		e.conflict = false
-		e.modTime = time.Time{}
-		e.prompt, e.promptValue, e.promptCursor = "", "", 0
-		e.save()
+		e.submitPrompt()
+	case tcell.KeyCtrlS:
+		e.submitPrompt()
 	case tcell.KeyLeft:
 		if e.promptCursor > 0 {
 			e.promptCursor--
@@ -919,6 +871,60 @@ func (e *editor) promptKey(ev *tcell.EventKey) {
 			e.findFromStart()
 		}
 	}
+}
+
+func (e *editor) submitPrompt() {
+	if e.prompt == "Find: " {
+		e.search = e.promptValue
+		e.prompt, e.promptValue, e.promptCursor = "", "", 0
+		e.findNext()
+		return
+	}
+	if e.prompt == "Replace with: " {
+		e.replace = e.promptValue
+		e.prompt, e.promptValue, e.promptCursor = "", "", 0
+		e.replaceCurrent()
+		return
+	}
+	if e.prompt == "Rename to: " {
+		e.renameFile(e.promptValue)
+		e.prompt, e.promptValue, e.promptCursor = "", "", 0
+		return
+	}
+	if e.prompt == "Open path: " {
+		path := strings.TrimSpace(e.promptValue)
+		e.prompt, e.promptValue, e.promptCursor = "", "", 0
+		if path == "" {
+			e.status = "Enter a filename"
+			return
+		}
+		expanded, err := expandPathInput(path)
+		if err != nil {
+			e.status = err.Error()
+			return
+		}
+		e.openFile(expanded)
+		return
+	}
+	path := strings.TrimSpace(e.promptValue)
+	if path == "" {
+		e.status = "Enter a filename"
+		return
+	}
+	if filepath.Ext(path) == "" {
+		path += ".md"
+	}
+	expanded, err := expandPathInput(path)
+	if err != nil {
+		e.status = err.Error()
+		return
+	}
+	e.path = expanded
+	e.untitled = false
+	e.conflict = false
+	e.modTime = time.Time{}
+	e.prompt, e.promptValue, e.promptCursor = "", "", 0
+	e.save()
 }
 
 func (e *editor) startMenuKey(ev *tcell.EventKey) bool {
