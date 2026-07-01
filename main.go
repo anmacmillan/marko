@@ -129,6 +129,7 @@ func newEditor(path string, untitled bool) (*editor, error) {
 	if err := s.Init(); err != nil {
 		return nil, err
 	}
+	disableTTYFlowControl()
 	s.EnableMouse()
 	s.EnablePaste()
 	status := "F1 shortcuts · F5/F6/F7 headings · Ctrl-A select all · Ctrl-C copy · Ctrl-S save"
