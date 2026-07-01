@@ -1992,6 +1992,88 @@ func TestRecentPanelUsesBracketedEmptyStateAndSplitFooter(t *testing.T) {
 	}
 }
 
+func TestRecentPanelRefreshesFromDisk(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	path := filepath.Join(dir, "note.md")
+	if err := os.WriteFile(path, []byte("hello"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(recentConfigPath()), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(recentConfigPath(), []byte(path+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(80, 16)
+	e := &editor{
+		screen:     screen,
+		lines:      []string{"x"},
+		theme:      themeByName("calm"),
+		showRecent: true,
+		recent:     nil,
+	}
+	e.draw()
+	var rendered strings.Builder
+	for row := 0; row < 16; row++ {
+		rendered.WriteString(simulationLine(screen, row, 80))
+		rendered.WriteByte('\n')
+	}
+	text := rendered.String()
+	if !strings.Contains(text, "note.md [") {
+		t.Fatalf("recent panel did not refresh from disk:\n%s", rendered.String())
+	}
+}
+
+func TestRecentPanelShowsRecencyGradient(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	oldPath := filepath.Join(dir, "old.md")
+	newPath := filepath.Join(dir, "new.md")
+	if err := os.WriteFile(oldPath, []byte("old"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newPath, []byte("new"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(recentConfigPath()), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(recentConfigPath(), []byte(newPath+"\n"+oldPath+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(100, 18)
+	e := &editor{
+		screen:     screen,
+		lines:      []string{"x"},
+		theme:      themeByName("calm"),
+		showRecent: true,
+	}
+	newColor := recentGradientColor(0, 2)
+	oldColor := recentGradientColor(1, 2)
+	if newColor != tcell.GetColor("#ff6b5f") {
+		t.Fatalf("newest recent color = %v, want %v", newColor, tcell.GetColor("#ff6b5f"))
+	}
+	if oldColor != tcell.GetColor("#5aa8ff") {
+		t.Fatalf("oldest recent color = %v, want %v", oldColor, tcell.GetColor("#5aa8ff"))
+	}
+	style := e.recentStyle(tcell.StyleDefault, 0, 2)
+	fg, _, attrs := style.Decompose()
+	if fg != newColor || attrs&tcell.AttrBold == 0 {
+		t.Fatalf("recent style for newest item = fg:%v attrs:%v, want fg:%v bold", fg, attrs, newColor)
+	}
+}
+
 func TestStartMenuTickDoesNotAutosave(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "note.md")

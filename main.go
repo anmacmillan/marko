@@ -961,8 +961,9 @@ func (e *editor) startMenuKey(ev *tcell.EventKey) bool {
 }
 
 type startMenuItem struct {
-	label  string
-	action string
+	label      string
+	action     string
+	recentRank int
 }
 
 func (e *editor) openStartMenu() {
@@ -984,8 +985,8 @@ func (e *editor) startMenuItems() []startMenuItem {
 		{label: "[R] Recent files", action: "recent"},
 		{label: "[T] Theme: " + e.displayThemeName(), action: "theme"},
 	}
-	for _, path := range e.recent {
-		items = append(items, startMenuItem{label: "    " + path, action: "open:" + path})
+	for i, path := range e.recent {
+		items = append(items, startMenuItem{label: "    " + recentDisplayLabel(path, 72), action: "open:" + path, recentRank: i})
 	}
 	items = append(items, startMenuItem{label: "Return to document", action: "return"})
 	items = append(items, startMenuItem{label: "[Q] Quit", action: "quit"})
@@ -2263,6 +2264,14 @@ func (e *editor) drawStartMenu(w, h int) {
 			style = style.Bold(true)
 		} else if strings.HasPrefix(line, "> ") {
 			style = e.selectedStyle(style)
+		} else if row >= 4 {
+			itemIndex := row - 4
+			if itemIndex < len(items) {
+				item := items[itemIndex]
+				if strings.HasPrefix(item.action, "open:") {
+					style = e.recentStyle(style, item.recentRank, len(e.recent))
+				}
+			}
 		}
 		e.put(x+2, y+1+row, line, style, min(w, x+2+width))
 	}
@@ -2270,13 +2279,14 @@ func (e *editor) drawStartMenu(w, h int) {
 }
 
 func (e *editor) drawRecent(w, h int) {
+	e.recent = loadRecent()
 	lines := []string{" Recent Markdown files "}
 	for i, path := range e.recent {
 		prefix := "  "
 		if i == e.recentIndex {
 			prefix = "> "
 		}
-		lines = append(lines, prefix+path)
+		lines = append(lines, prefix+recentDisplayLabel(path, max(24, w-6)))
 	}
 	if len(e.recent) == 0 {
 		lines = append(lines, "  <No recent files>")
@@ -2292,8 +2302,79 @@ func (e *editor) drawRecent(w, h int) {
 		e.put(x, y+row, strings.Repeat(" ", min(w-x, width+4)), box, w)
 	}
 	for row, line := range lines {
-		e.put(x+2, y+1+row, line, box, min(w, x+2+width))
+		style := box
+		if row >= 1 && row <= len(e.recent) {
+			style = e.recentStyle(style, row-1, len(e.recent))
+		}
+		e.put(x+2, y+1+row, line, style, min(w, x+2+width))
 	}
+}
+
+func (e *editor) recentStyle(style tcell.Style, rank, total int) tcell.Style {
+	if total <= 0 {
+		return style
+	}
+	color := recentGradientColor(rank, total)
+	if rank <= 0 {
+		return style.Foreground(color).Bold(true)
+	}
+	return style.Foreground(color)
+}
+
+func recentGradientColor(rank, total int) tcell.Color {
+	if total <= 1 {
+		return tcell.GetColor("#ff6b5f")
+	}
+	if rank < 0 {
+		rank = 0
+	}
+	if rank >= total {
+		rank = total - 1
+	}
+	start := [3]int{255, 107, 95}
+	end := [3]int{90, 168, 255}
+	span := total - 1
+	r := start[0] + (end[0]-start[0])*rank/span
+	g := start[1] + (end[1]-start[1])*rank/span
+	b := start[2] + (end[2]-start[2])*rank/span
+	return tcell.GetColor(fmt.Sprintf("#%02x%02x%02x", r, g, b))
+}
+
+func recentDisplayLabel(path string, width int) string {
+	ts := ""
+	if info, err := os.Stat(path); err == nil {
+		ts = info.ModTime().Format("2006-01-02 15:04")
+	}
+	if ts == "" {
+		return path
+	}
+	label := path + " [" + ts + "]"
+	if runeLen(label) <= width {
+		return label
+	}
+	available := width - runeLen(ts) - 3
+	if available < 8 {
+		available = 8
+	}
+	clipped := truncatePathMiddle(path, available)
+	return clipped + " [" + ts + "]"
+}
+
+func truncatePathMiddle(value string, width int) string {
+	runes := []rune(value)
+	if len(runes) <= width {
+		return value
+	}
+	if width <= 1 {
+		return "…"
+	}
+	if width == 2 {
+		return "…" + string(runes[len(runes)-1:])
+	}
+	keep := width - 1
+	front := keep / 2
+	back := keep - front
+	return string(runes[:front]) + "…" + string(runes[len(runes)-back:])
 }
 
 func (e *editor) visualRows(width int) []visualRow {
