@@ -1930,6 +1930,27 @@ func TestUntitledSavePrompts(t *testing.T) {
 	}
 }
 
+func TestSavePromptShowsZoxideHint(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer screen.Fini()
+	screen.SetSize(80, 3)
+	e := &editor{
+		screen:      screen,
+		lines:       []string{"x"},
+		prompt:      "Save as: ",
+		promptValue: "untitled.md",
+		theme:       themeByName("calm"),
+	}
+	e.draw()
+	got := simulationLine(screen, 2, 80)
+	if !strings.Contains(got, "[~/..., z query/file.md]") {
+		t.Fatalf("save prompt hint missing: %q", got)
+	}
+}
+
 func TestNamedSaveDoesNotPrompt(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "named.md")

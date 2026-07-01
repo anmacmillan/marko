@@ -1977,6 +1977,9 @@ func (e *editor) draw() {
 	status := fmt.Sprintf(" %s%s  Ln %d, Col %d  %s  [%s]  %s", name, mark, e.y+1, e.x+1, cwd, e.stats(), e.status)
 	if e.prompt != "" {
 		status = " " + e.prompt + e.promptValue
+		if e.prompt == "Save as: " || e.prompt == "Open path: " {
+			status += "  [~/..., z query/file.md]"
+		}
 	}
 	if !e.focusMode {
 		e.put(0, h-1, status, tcell.StyleDefault.Background(e.theme.statusBG).Foreground(e.theme.statusFG), w)
