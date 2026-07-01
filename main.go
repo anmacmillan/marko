@@ -1845,6 +1845,7 @@ func (e *editor) save() {
 	}
 	e.conflict = false
 	e.status = "Saved " + e.path
+	e.rememberRecent(e.path)
 	_ = os.Remove(journalPath(e.path))
 }
 

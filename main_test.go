@@ -1457,6 +1457,18 @@ func TestAutosaveWritesThenRemovesRecoveryJournal(t *testing.T) {
 	}
 }
 
+func TestSaveMovesFileIntoRecentList(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	path := filepath.Join(dir, "new-note.md")
+	e := &editor{path: path, lines: []string{"hello"}, dirty: true}
+	e.save()
+	got := loadRecent()
+	if len(got) != 1 || got[0] != path {
+		t.Fatalf("recent after save = %#v, want [%q]", got, path)
+	}
+}
+
 func TestSaveProtectsExternalChanges(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "doc.md")
 	if err := os.WriteFile(path, []byte("external"), 0644); err != nil {
