@@ -2189,6 +2189,88 @@ func TestOpenPromptTabCompletesZoxideWithFilename(t *testing.T) {
 	}
 }
 
+func writeMultiWordZoxideStub(t *testing.T, dir, target string) {
+	t.Helper()
+	bin := filepath.Join(dir, "zoxide")
+	script := "#!/bin/sh\nif [ \"$1\" = query ] && [ \"$2\" = little ] && [ \"$3\" = marco ] && [ \"$#\" = 3 ]; then printf '%s\\n' '" + target + "'; exit 0; fi\nexit 1\n"
+	if err := os.WriteFile(bin, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+}
+
+func TestZoxideMultiWordQueryPassesSeparateKeywords(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeMultiWordZoxideStub(t, dir, target)
+	got, err := expandPathInput("z little marco")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != target {
+		t.Fatalf("expandPathInput = %q, want %q", got, target)
+	}
+}
+
+func TestSavePromptZoxideQueryWithSpaceFilename(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeMultiWordZoxideStub(t, dir, target)
+	e := &editor{lines: []string{"hello"}, prompt: "Save as: ", promptValue: "z little marco notes", untitled: true}
+	e.promptKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	want := filepath.Join(target, "notes.md")
+	if e.path != want {
+		t.Fatalf("path = %q, want %q", e.path, want)
+	}
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("saved file missing: %v", err)
+	}
+}
+
+func TestOpenPromptZoxideQueryWithSpaceFilename(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeMultiWordZoxideStub(t, dir, target)
+	e := &editor{lines: []string{""}, prompt: "Open path: ", promptValue: "z little marco draft", untitled: true}
+	e.promptKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	want := filepath.Join(target, "draft.md")
+	if e.path != want {
+		t.Fatalf("path = %q, want %q", e.path, want)
+	}
+	if e.status != "New file "+want {
+		t.Fatalf("status = %q, want New file %q", e.status, want)
+	}
+}
+
+func TestTabCompletesZoxideMultiWordWithFilename(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeMultiWordZoxideStub(t, dir, target)
+	e := &editor{lines: []string{"hello"}, prompt: "Save as: ", promptValue: "z little marco notes", promptCursor: runeLen("z little marco notes")}
+	e.promptKey(tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone))
+	want := filepath.Join(target, "notes.md")
+	if e.promptValue != want {
+		t.Fatalf("promptValue = %q, want %q", e.promptValue, want)
+	}
+	e = &editor{lines: []string{"hello"}, prompt: "Save as: ", promptValue: "z little marco", promptCursor: runeLen("z little marco")}
+	e.promptKey(tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone))
+	if want := target + string(os.PathSeparator); e.promptValue != want {
+		t.Fatalf("bare promptValue = %q, want %q", e.promptValue, want)
+	}
+}
+
 func TestTerminalTitleUsesMarkoAndFilename(t *testing.T) {
 	if got, want := terminalTitle("/tmp/note.md", false), "Marko - note.md"; got != want {
 		t.Fatalf("terminalTitle = %q, want %q", got, want)
@@ -2494,7 +2576,7 @@ func TestSavePromptShowsZoxideHint(t *testing.T) {
 	}
 	e.draw()
 	got := simulationLine(screen, 2, 80)
-	if !strings.Contains(got, "[type z folder, press Tab, then filename]") {
+	if !strings.Contains(got, "[z folder filename, or z folder + Tab]") {
 		t.Fatalf("save prompt hint missing: %q", got)
 	}
 }

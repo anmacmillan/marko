@@ -122,20 +122,26 @@ Press `F4` to open the Marko home screen from any document. Use Up/Down and Ente
 
 Recent files are grouped by age on the home screen and in the recent picker: past 48 hours, past week, older, and older than 2 weeks.
 
-Open and Save As prompts prioritize zoxide shortcuts, then fall back to ordinary paths. For an untitled note, Save As starts with `untitled.md` selected, so typing immediately replaces it. Type a zoxide query and press `Tab` to expand it before entering the filename:
+Open and Save As prompts prioritize zoxide shortcuts, then fall back to ordinary paths. For an untitled note, Save As starts with `untitled.md` selected, so typing immediately replaces it. Type a zoxide query — multi-word queries work, each word is a zoxide keyword — followed by a filename, all in one go:
+
+```text
+z little marco draft
+```
+
+If the whole input has no zoxide match, the last word is treated as the filename, so this opens or saves `draft.md` in the `little-marco` directory. A slash also separates the filename explicitly (useful for names with spaces):
+
+```text
+z briefs/meeting notes.md
+```
+
+Or press `Tab` to expand the folder first, then type the filename:
 
 ```text
 z briefs<Tab>
 /Users/you/Documents/Briefs/
 ```
 
-Then type the filename and press `Enter`. You can also type it in one go:
-
-```text
-z briefs/draft.md
-```
-
-That expands `briefs` through `zoxide query briefs`, then opens or saves `draft.md` in that directory. If the completed path is a directory, Marko uses `untitled.md`.
+If the final path is a directory, Marko uses `untitled.md`; a missing extension becomes `.md`.
 
 ## Philosophy
 

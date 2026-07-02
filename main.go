@@ -1028,11 +1028,7 @@ func completeZoxidePromptValue(value string) (string, error) {
 	if !strings.HasPrefix(value, "z ") {
 		return "", nil
 	}
-	query, rest := splitZoxideInput(strings.TrimSpace(strings.TrimPrefix(value, "z ")))
-	if query == "" {
-		return "", fmt.Errorf("Enter a zoxide query")
-	}
-	base, err := expandZoxidePath(query)
+	base, rest, err := resolveZoxideInput(strings.TrimSpace(strings.TrimPrefix(value, "z ")))
 	if err != nil {
 		return "", err
 	}
@@ -1056,13 +1052,16 @@ func withTrailingSeparator(path string) string {
 func (e *editor) expandSavePathInput(path string) (string, error) {
 	path = strings.TrimSpace(path)
 	if strings.HasPrefix(path, "z ") {
-		query, rest := splitZoxideInput(strings.TrimSpace(strings.TrimPrefix(path, "z ")))
+		base, rest, err := resolveZoxideInput(strings.TrimSpace(strings.TrimPrefix(path, "z ")))
+		if err != nil {
+			return "", err
+		}
 		if rest == "" {
 			rest = e.defaultSaveName()
 		} else if filepath.Ext(rest) == "" {
 			rest += ".md"
 		}
-		return expandZoxidePath(query + "/" + rest)
+		return filepath.Join(base, rest), nil
 	}
 	if filepath.Ext(path) == "" {
 		path += ".md"
@@ -1296,29 +1295,54 @@ func expandPathInput(path string) (string, error) {
 }
 
 func expandZoxidePath(input string) (string, error) {
-	if input == "" {
-		return "", fmt.Errorf("Enter a zoxide query")
-	}
-	query, rest := splitZoxideInput(input)
-	if query == "" {
-		return "", fmt.Errorf("Enter a zoxide query")
-	}
-	zoxide, err := exec.LookPath("zoxide")
+	base, rest, err := resolveZoxideInput(input)
 	if err != nil {
-		return "", fmt.Errorf("zoxide not found")
-	}
-	out, err := exec.Command(zoxide, "query", query).Output()
-	if err != nil {
-		return "", fmt.Errorf("zoxide match not found: %s", query)
-	}
-	base := strings.TrimSpace(string(out))
-	if base == "" {
-		return "", fmt.Errorf("zoxide match not found: %s", query)
+		return "", err
 	}
 	if rest == "" {
 		return base, nil
 	}
 	return filepath.Join(base, rest), nil
+}
+
+// resolveZoxideInput turns "query words[/sub/name]" into a matched directory
+// and a remainder. Query words go to zoxide as separate keywords; if the full
+// query has no match, the last word is retried as a filename remainder.
+func resolveZoxideInput(input string) (string, string, error) {
+	if input == "" {
+		return "", "", fmt.Errorf("Enter a zoxide query")
+	}
+	query, rest := splitZoxideInput(input)
+	if query == "" {
+		return "", "", fmt.Errorf("Enter a zoxide query")
+	}
+	zoxide, err := exec.LookPath("zoxide")
+	if err != nil {
+		return "", "", fmt.Errorf("zoxide not found")
+	}
+	words := strings.Fields(query)
+	base, err := zoxideQuery(zoxide, words)
+	if err != nil && rest == "" && len(words) > 1 {
+		if dir, dirErr := zoxideQuery(zoxide, words[:len(words)-1]); dirErr == nil {
+			return dir, words[len(words)-1], nil
+		}
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("zoxide match not found: %s", query)
+	}
+	return base, rest, nil
+}
+
+func zoxideQuery(zoxide string, words []string) (string, error) {
+	out, err := exec.Command(zoxide, append([]string{"query"}, words...)...).Output()
+	if err != nil {
+		return "", err
+	}
+	path := strings.TrimSpace(string(out))
+	if path == "" {
+		return "", fmt.Errorf("no match")
+	}
+	return path, nil
 }
 
 func splitZoxideInput(input string) (string, string) {
@@ -2242,7 +2266,7 @@ func (e *editor) draw() {
 	if e.prompt != "" {
 		status = " " + e.prompt + e.promptValue
 		if e.prompt == "Save as: " || e.prompt == "Open path: " {
-			status += "  [type z folder, press Tab, then filename]"
+			status += "  [z folder filename, or z folder + Tab]"
 		}
 	} else if e.focusMode && !e.statusUntil.IsZero() {
 		status = " " + e.status
