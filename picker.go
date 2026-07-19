@@ -29,6 +29,7 @@ type pickerItem struct {
 	path    string // absolute path
 	dir     bool
 	recent  bool
+	depth   int // indent level in the expanded folder tree
 	modTime time.Time
 	content string // original file text (notes search only)
 	lowered string // lowercased content for case-insensitive matching
@@ -47,7 +48,8 @@ type picker struct {
 	input     string
 	cursor    int
 	selectAll bool
-	index     int // -1 = input row focused; >= 0 selects a list row
+	index     int             // -1 = input row focused; >= 0 selects a list row
+	expanded  map[string]bool // directories unfolded inline with Right arrow
 	items     []pickerItem
 	err       string
 }
@@ -246,7 +248,35 @@ func (e *editor) refreshPicker() {
 			p.items = append(p.items, item)
 		}
 	}
-	p.items = append(p.items, listPickerDir(p.dir)...)
+	if p.mode == pickerSaveAs {
+		for _, dir := range loadRecentDirs() {
+			if dir == p.dir {
+				continue
+			}
+			p.items = append(p.items, pickerItem{name: filepath.Base(dir), path: dir, dir: true, recent: true})
+		}
+	}
+	if parent := filepath.Dir(p.dir); p.mode != pickerOpen && parent != p.dir {
+		p.items = append(p.items, pickerItem{name: "..", path: parent, dir: true})
+	}
+	p.items = append(p.items, listPickerTree(p.dir, 0, p.expanded)...)
+}
+
+// listPickerTree lists dir and splices the contents of any unfolded
+// subdirectory in after its row, indented one level deeper.
+func listPickerTree(dir string, depth int, expanded map[string]bool) []pickerItem {
+	if depth > 8 {
+		return nil // symlink-cycle guard
+	}
+	var out []pickerItem
+	for _, item := range listPickerDir(dir) {
+		item.depth = depth
+		out = append(out, item)
+		if item.dir && expanded[item.path] {
+			out = append(out, listPickerTree(item.path, depth+1, expanded)...)
+		}
+	}
+	return out
 }
 
 func listPickerDir(dir string) []pickerItem {
@@ -391,11 +421,17 @@ func (e *editor) pickerKey(ev *tcell.EventKey) {
 	case tcell.KeyTab:
 		e.pickerTab()
 	case tcell.KeyLeft:
+		if e.pickerCollapse() {
+			return
+		}
 		p.selectAll = false
 		if p.cursor > 0 {
 			p.cursor--
 		}
 	case tcell.KeyRight:
+		if e.pickerExpand() {
+			return
+		}
 		p.selectAll = false
 		if p.cursor < runeLen(p.input) {
 			p.cursor++
@@ -455,6 +491,63 @@ func (e *editor) pickerInputChanged() {
 	} else {
 		p.index = -1
 	}
+}
+
+// treeRow reports whether the highlighted row is a real directory inside the
+// browsed tree (not "..", not a recent-folder shortcut) and returns it.
+func (p *picker) treeRow() (pickerItem, bool) {
+	if p.mode == pickerNotes || p.index < 0 {
+		return pickerItem{}, false
+	}
+	visible := p.visibleItems()
+	if p.index >= len(visible) {
+		return pickerItem{}, false
+	}
+	item := visible[p.index]
+	if item.recent || item.name == ".." {
+		return pickerItem{}, false
+	}
+	return item, true
+}
+
+// pickerExpand unfolds the highlighted directory inline (Right arrow).
+func (e *editor) pickerExpand() bool {
+	p := e.picker
+	item, ok := p.treeRow()
+	if !ok || !item.dir || p.expanded[item.path] {
+		return false
+	}
+	if p.expanded == nil {
+		p.expanded = map[string]bool{}
+	}
+	p.expanded[item.path] = true
+	e.refreshPicker()
+	return true
+}
+
+// pickerCollapse folds the highlighted directory, or jumps to the parent
+// row of a nested entry (Left arrow).
+func (e *editor) pickerCollapse() bool {
+	p := e.picker
+	item, ok := p.treeRow()
+	if !ok {
+		return false
+	}
+	if item.dir && p.expanded[item.path] {
+		delete(p.expanded, item.path)
+		e.refreshPicker()
+		return true
+	}
+	if item.depth > 0 {
+		visible := p.visibleItems()
+		for i := p.index - 1; i >= 0; i-- {
+			if visible[i].dir && !visible[i].recent && visible[i].name != ".." && visible[i].depth == item.depth-1 {
+				p.index = i
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (e *editor) pickerAscend() {
@@ -613,11 +706,11 @@ func (p *picker) title() string {
 func (p *picker) footerHint() string {
 	switch p.mode {
 	case pickerOpen:
-		return "Enter open · Tab into folder · Backspace up · z query Tab · Esc cancel"
+		return "Enter open · → unfold folder · Backspace up · z query Tab · Esc cancel"
 	case pickerNotes:
 		return "Type words to match names & content · Enter open · Esc cancel"
 	}
-	return "Enter save · Up/Down browse · Backspace up · Esc cancel"
+	return "Enter save · →/← unfold/fold folders · Backspace up · Esc cancel"
 }
 
 // pickerCollision reports a warning when committing the current input would
@@ -658,12 +751,16 @@ type pickerRow struct {
 func (e *editor) pickerRows(visible []pickerItem, width int) []pickerRow {
 	p := e.picker
 	rows := []pickerRow{}
-	showHeaders := p.mode == pickerOpen && strings.TrimSpace(p.input) == ""
+	showHeaders := (p.mode == pickerOpen || p.mode == pickerSaveAs) && strings.TrimSpace(p.input) == ""
+	recentHeader := "Recent"
+	if p.mode == pickerSaveAs {
+		recentHeader = "Recent folders"
+	}
 	lastRecent := false
 	for i, item := range visible {
 		if showHeaders {
 			if i == 0 && item.recent {
-				rows = append(rows, pickerRow{text: "Recent", header: true, itemIdx: -1})
+				rows = append(rows, pickerRow{text: recentHeader, header: true, itemIdx: -1})
 			}
 			if (i == 0 && !item.recent) || (lastRecent && !item.recent) {
 				rows = append(rows, pickerRow{text: "This folder", header: true, itemIdx: -1})
@@ -676,6 +773,12 @@ func (e *editor) pickerRows(visible []pickerItem, width int) []pickerRow {
 		}
 		if item.recent {
 			label = truncatePathMiddle(shortenHomePath(item.path), width-20)
+			if item.dir {
+				label += string(os.PathSeparator)
+			}
+		}
+		if item.depth > 0 {
+			label = strings.Repeat("  ", item.depth) + label
 		}
 		if item.snippet != "" {
 			label += "  · " + item.snippet

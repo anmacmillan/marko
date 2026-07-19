@@ -1103,6 +1103,57 @@ func TestWordGoalFlow(t *testing.T) {
 	}
 }
 
+func TestSaveAsPickerTreeExpandCollapse(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", config)
+	t.Setenv("HOME", config)
+	parent := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(parent, "matters", "dobson"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parent, "matters", "note.md"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	e := &editor{lines: []string{"x"}, theme: themeByName("calm")}
+	e.picker = &picker{mode: pickerSaveAs, dir: parent, index: -1}
+	e.refreshPicker()
+
+	visible := e.picker.visibleItems()
+	if len(visible) < 2 || visible[0].name != ".." || visible[1].name != "matters" {
+		t.Fatalf("save picker listing = %#v, want .. then matters", visible)
+	}
+	e.picker.index = 1 // highlight "matters"
+	e.pickerKey(tcell.NewEventKey(tcell.KeyRight, 0, tcell.ModNone))
+	visible = e.picker.visibleItems()
+	if len(visible) != 4 || visible[2].name != "dobson" || visible[2].depth != 1 || visible[3].name != "note.md" || visible[3].depth != 1 {
+		t.Fatalf("expanded listing = %#v, want dobson and note.md nested under matters", visible)
+	}
+	e.pickerKey(tcell.NewEventKey(tcell.KeyLeft, 0, tcell.ModNone))
+	if visible = e.picker.visibleItems(); len(visible) != 2 {
+		t.Fatalf("collapse left %d rows, want 2", len(visible))
+	}
+}
+
+func TestRecentDirsRememberAndSurfaceInSaveAs(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", config)
+	t.Setenv("HOME", config)
+	dirA, dirB, elsewhere := t.TempDir(), t.TempDir(), t.TempDir()
+	rememberRecentDir(dirA)
+	rememberRecentDir(dirA) // dedup: still one entry
+	rememberRecentDir(dirB)
+	if got := loadRecentDirs(); len(got) != 2 || got[0] != dirB || got[1] != dirA {
+		t.Fatalf("loadRecentDirs = %#v, want [dirB dirA]", got)
+	}
+	e := &editor{lines: []string{"x"}, theme: themeByName("calm")}
+	e.picker = &picker{mode: pickerSaveAs, dir: elsewhere, index: -1}
+	e.refreshPicker()
+	visible := e.picker.visibleItems()
+	if len(visible) < 2 || !visible[0].recent || !visible[0].dir || visible[0].path != dirB {
+		t.Fatalf("save picker did not surface recent folders first: %#v", visible)
+	}
+}
+
 func TestNotesDirEnvOverride(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "captures")
 	t.Setenv("MARKO_NOTES_DIR", dir)

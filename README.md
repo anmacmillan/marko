@@ -131,6 +131,8 @@ Press `Ctrl-G` to cycle and remember themes. `matrix` is the phosphor terminal-f
 
 Save As (`F2`) and Rename (`Ctrl-Shift-R`) use the same panel: the filename is pre-selected for instant retyping, the target folder's contents are listed below so you can see collisions (with an explicit "overwrites…" warning), and you can browse into a different folder before committing. Rename is anchored to the file's own directory, so renaming never silently moves the file to wherever you launched Marko from.
 
+Save As is a real folder navigator: a `..` row leads up, `Right` on a highlighted folder unfolds its contents inline as an indented tree (`Left` folds it again, or jumps a nested entry back to its parent folder), and `Enter` steps in. Above the listing, a **Recent folders** section offers the directories you last saved into — so the second note for a matter is `Down`, `Enter`, `Enter`.
+
 Press `F4` to open the Marko home screen from any document. Use Up/Down and Enter to choose New document, Open / browse, a recent file, Theme, Return to document, or Quit. `Esc` returns to the current document. Recent files are grouped by age on the home screen: past 48 hours, past week, older, and older than 2 weeks.
 
 Launching `marko` with no file shows the same home screen over a fresh note — but there, **just start typing**: the first character dismisses the menu and lands in the note (the footer shows where it will save). Letter accelerators only apply to the `F4`-opened menu.

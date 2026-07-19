@@ -341,6 +341,59 @@ func recentConfigPath() string {
 	return filepath.Join(dir, "marko", "recent")
 }
 
+const maxRecentDirs = 6
+
+func recentDirsConfigPath() string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return filepath.Join(".", ".marko-recent-dirs")
+	}
+	return filepath.Join(dir, "marko", "recent-dirs")
+}
+
+func loadRecentDirs() []string {
+	data, err := os.ReadFile(recentDirsConfigPath())
+	if err != nil {
+		return nil
+	}
+	var dirs []string
+	for _, path := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if path == "" {
+			continue
+		}
+		if info, err := os.Stat(path); err == nil && info.IsDir() {
+			dirs = append(dirs, path)
+		}
+		if len(dirs) == maxRecentDirs {
+			break
+		}
+	}
+	return dirs
+}
+
+// rememberRecentDir records where a file was just saved so the Save As
+// picker can offer recent destinations first. No-op when dir is already
+// the newest entry, so autosave doesn't rewrite the config every 2s.
+func rememberRecentDir(dir string) {
+	existing := loadRecentDirs()
+	if len(existing) > 0 && existing[0] == dir {
+		return
+	}
+	dirs := []string{dir}
+	for _, d := range existing {
+		if d != dir {
+			dirs = append(dirs, d)
+		}
+		if len(dirs) == maxRecentDirs {
+			break
+		}
+	}
+	config := recentDirsConfigPath()
+	if os.MkdirAll(filepath.Dir(config), 0755) == nil {
+		_ = os.WriteFile(config, []byte(strings.Join(dirs, "\n")+"\n"), 0644)
+	}
+}
+
 func notesDirConfigPath() string {
 	dir, err := os.UserConfigDir()
 	if err != nil {
@@ -2232,6 +2285,7 @@ func (e *editor) save() {
 	e.conflict = false
 	e.status = "Saved " + shortenHomePath(e.path)
 	e.rememberRecent(e.path)
+	rememberRecentDir(absDir(filepath.Dir(e.path)))
 	_ = os.Remove(journalPath(e.path))
 	e.updateTerminalTitle()
 	e.flashStatus()
