@@ -9,57 +9,59 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v2"
 )
 
 type editor struct {
-	screen          tcell.Screen
-	path            string
-	lines           []string
-	x, y, top       int
-	dirty           bool
-	status          string
-	statusUntil     time.Time
-	confirmQuit     bool
-	preferredX      int
-	prompt          string
-	promptValue     string
-	promptCursor    int
-	promptSelectAll bool
-	lastEdit        time.Time
-	recovery        string
-	theme           theme
-	themeName       string
-	undo, redo      []snapshot
-	selecting       bool
-	selX, selY      int
-	mouseDown       bool
-	lastClick       time.Time
-	clickX          int
-	clickY          int
-	clickCount      int
-	search          string
-	replace         string
-	lastAction      time.Time
-	focusMode       bool
-	manualScroll    bool
-	modTime         time.Time
-	conflict        bool
-	showHelp        bool
-	showCoach       bool
-	coachUntil      time.Time
-	showStartMenu   bool
-	startMenuIndex  int
-	recent          []string
-	renameFrom      string
-	waitingForPaste bool
-	untitled        bool
-	picker          *picker
-	tableGrid       *tableGridPick
-	focusScope      int     // 0 paragraph, 1 section
-	dimStrength     float64 // per-row dim strength set during draw
+	screen           tcell.Screen
+	path             string
+	lines            []string
+	x, y, top        int
+	dirty            bool
+	status           string
+	statusUntil      time.Time
+	confirmQuit      bool
+	preferredX       int
+	prompt           string
+	promptValue      string
+	promptCursor     int
+	promptSelectAll  bool
+	lastEdit         time.Time
+	recovery         string
+	theme            theme
+	themeName        string
+	undo, redo       []snapshot
+	selecting        bool
+	selX, selY       int
+	mouseDown        bool
+	lastClick        time.Time
+	clickX           int
+	clickY           int
+	clickCount       int
+	search           string
+	replace          string
+	lastAction       time.Time
+	focusMode        bool
+	manualScroll     bool
+	modTime          time.Time
+	conflict         bool
+	showHelp         bool
+	showCoach        bool
+	coachUntil       time.Time
+	showStartMenu    bool
+	startMenuCapture bool // launch screen over a fresh note: typing falls through into it
+	startMenuIndex   int
+	recent           []string
+	renameFrom       string
+	waitingForPaste  bool
+	untitled         bool
+	picker           *picker
+	tableGrid        *tableGridPick
+	focusScope       int     // 0 paragraph, 1 section
+	dimStrength      float64 // per-row dim strength set during draw
 }
 
 type snapshot struct {
@@ -105,7 +107,7 @@ func main() {
 	if len(os.Args) == 2 {
 		path = os.Args[1]
 	} else {
-		path = uniqueUntitledPath(time.Now(), ".")
+		path = uniqueUntitledPath(time.Now(), notesDir())
 		untitled = true
 	}
 	e, err := newEditor(path, untitled)
@@ -148,7 +150,7 @@ func newEditor(path string, untitled bool) (*editor, error) {
 	status := "F1 shortcuts · F5/F6/F7 headings · Ctrl-A select all · Ctrl-C copy · Ctrl-S save"
 	themeName := selectedThemeName()
 	now := time.Now()
-	e := &editor{screen: s, path: path, untitled: untitled, lines: lines, status: status, themeName: themeName, theme: themeByName(themeName), lastAction: now, focusMode: true, modTime: modTime, showCoach: true, coachUntil: now.Add(3 * time.Second), showStartMenu: untitled}
+	e := &editor{screen: s, path: path, untitled: untitled, lines: lines, status: status, themeName: themeName, theme: themeByName(themeName), lastAction: now, focusMode: true, modTime: modTime, showCoach: true, coachUntil: now.Add(3 * time.Second), showStartMenu: untitled, startMenuCapture: untitled}
 	e.updateTerminalTitle()
 	if !untitled {
 		e.rememberRecent(path)
@@ -160,6 +162,56 @@ func newEditor(path string, untitled bool) (*editor, error) {
 
 func datedUntitledPath(now time.Time) string {
 	return now.Format("20060102") + "_untitled.md"
+}
+
+// slugFromTitle turns a note's first line into a filename-safe slug:
+// markdown markers are stripped, words are lowercased and hyphen-joined,
+// and the result is capped at eight words.
+func slugFromTitle(line string) string {
+	trimmed := strings.TrimSpace(line)
+	for {
+		switch {
+		case strings.HasPrefix(trimmed, "#"), strings.HasPrefix(trimmed, ">"):
+			trimmed = strings.TrimSpace(strings.TrimLeft(trimmed, "#> "))
+			continue
+		case strings.HasPrefix(trimmed, "- [ ]"), strings.HasPrefix(trimmed, "- [x]"), strings.HasPrefix(trimmed, "- [X]"):
+			trimmed = strings.TrimSpace(trimmed[5:])
+			continue
+		case strings.HasPrefix(trimmed, "- "), strings.HasPrefix(trimmed, "* "), strings.HasPrefix(trimmed, "+ "):
+			trimmed = strings.TrimSpace(trimmed[2:])
+			continue
+		}
+		break
+	}
+	var words []string
+	var word []rune
+	flush := func() {
+		if len(word) > 0 && len(words) < 8 {
+			words = append(words, string(word))
+		}
+		word = word[:0]
+	}
+	for _, r := range strings.ToLower(trimmed) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			word = append(word, r)
+		} else {
+			flush()
+		}
+	}
+	flush()
+	return strings.Join(words, "-")
+}
+
+// suggestedSaveName names a quick capture after its first line, so
+// "Call with Vyas re settlement" becomes 20260719_call-with-vyas-re-settlement.md
+// rather than yet another untitled file.
+func (e *editor) suggestedSaveName(now time.Time) string {
+	for _, line := range e.lines {
+		if slug := slugFromTitle(line); slug != "" {
+			return now.Format("20060102") + "_" + slug + ".md"
+		}
+	}
+	return datedUntitledPath(now)
 }
 
 func terminalTitle(path string, dirty bool) string {
@@ -284,6 +336,35 @@ func recentConfigPath() string {
 		return filepath.Join(".", ".marko-recent")
 	}
 	return filepath.Join(dir, "marko", "recent")
+}
+
+func notesDirConfigPath() string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return filepath.Join(".", ".marko-notes-dir")
+	}
+	return filepath.Join(dir, "marko", "notes-dir")
+}
+
+// notesDir is where untitled quick notes live: MARKO_NOTES_DIR, then the
+// notes-dir config file, then ~/Notes. A quick capture always lands in one
+// predictable place instead of whatever directory Marko was launched from.
+func notesDir() string {
+	dir := ""
+	if env := strings.TrimSpace(os.Getenv("MARKO_NOTES_DIR")); env != "" {
+		dir = env
+	} else if data, err := os.ReadFile(notesDirConfigPath()); err == nil {
+		dir = strings.TrimSpace(string(data))
+	}
+	if dir != "" {
+		dir = absDir(expandUserPath(dir))
+	} else if home, err := os.UserHomeDir(); err == nil && home != "" {
+		dir = filepath.Join(home, "Notes")
+	} else {
+		dir = absDir(".")
+	}
+	_ = os.MkdirAll(dir, 0755)
+	return dir
 }
 
 func loadRecent() []string {
@@ -1039,7 +1120,7 @@ func (e *editor) defaultSaveName() string {
 	if e.path != "" && !e.untitled {
 		return filepath.Base(e.path)
 	}
-	return "untitled.md"
+	return e.suggestedSaveName(time.Now())
 }
 
 func (e *editor) openPath(path string) {
@@ -1095,6 +1176,13 @@ func (e *editor) startMenuKey(ev *tcell.EventKey) bool {
 	case tcell.KeyEnter:
 		return e.activateStartMenuAction(e.startMenuItems()[e.startMenuIndex].action)
 	case tcell.KeyRune:
+		if e.startMenuCapture {
+			// Launch screen over a fresh note: typing starts the note
+			// immediately instead of being eaten by menu accelerators —
+			// the phone-rings quick-capture path.
+			e.showStartMenu = false
+			return e.key(ev)
+		}
 		switch strings.ToLower(string(ev.Rune())) {
 		case "n":
 			e.activateStartMenuAction("new")
@@ -1123,6 +1211,7 @@ func (e *editor) openStartMenu() {
 	}
 	e.recent = loadRecent()
 	e.showStartMenu = true
+	e.startMenuCapture = false
 	e.picker = nil
 	e.tableGrid = nil
 	e.showHelp = false
@@ -1138,9 +1227,15 @@ func (e *editor) startMenuRecents() []string {
 }
 
 func (e *editor) startMenuItems() []startMenuItem {
+	newLabel, openLabel, themeLabel, quitLabel := "[N] New document", "[O] Open / browse...", "[T] Theme: ", "[Q] Quit"
+	if e.startMenuCapture {
+		// Typing falls through into the note, so single-letter
+		// accelerators are off and their hints would mislead.
+		newLabel, openLabel, themeLabel, quitLabel = "New document", "Open / browse...", "Theme: ", "Quit"
+	}
 	items := []startMenuItem{
-		{label: "[N] New document", action: "new", selectable: true},
-		{label: "[O] Open / browse...", action: "open", selectable: true},
+		{label: newLabel, action: "new", selectable: true},
+		{label: openLabel, action: "open", selectable: true},
 	}
 	for _, section := range groupedRecentFiles(e.startMenuRecents()) {
 		if len(section.entries) == 0 {
@@ -1152,9 +1247,9 @@ func (e *editor) startMenuItems() []startMenuItem {
 		}
 	}
 	items = append(items,
-		startMenuItem{label: "[T] Theme: " + e.displayThemeName(), action: "theme", selectable: true},
+		startMenuItem{label: themeLabel + e.displayThemeName(), action: "theme", selectable: true},
 		startMenuItem{label: "Return to document", action: "return", selectable: true},
-		startMenuItem{label: "[Q] Quit", action: "quit", selectable: true},
+		startMenuItem{label: quitLabel, action: "quit", selectable: true},
 	)
 	return items
 }
@@ -1205,7 +1300,7 @@ func (e *editor) newUntitledDocument() {
 	e.showStartMenu = false
 	e.lines = []string{""}
 	e.x, e.y, e.top = 0, 0, 0
-	e.path = uniqueUntitledPath(time.Now(), ".")
+	e.path = uniqueUntitledPath(time.Now(), notesDir())
 	e.untitled = true
 	e.dirty = false
 	e.conflict = false
@@ -2066,7 +2161,7 @@ func (e *editor) save() {
 		e.modTime = info.ModTime()
 	}
 	e.conflict = false
-	e.status = "Saved " + e.path
+	e.status = "Saved " + shortenHomePath(e.path)
 	e.rememberRecent(e.path)
 	_ = os.Remove(journalPath(e.path))
 	e.updateTerminalTitle()
@@ -2146,7 +2241,7 @@ func (e *editor) autosave() {
 			_ = os.WriteFile(journal, []byte(strings.Join(e.lines, "\n")), 0600)
 		}
 		e.save()
-		e.status = "Autosaved " + e.path
+		e.status = "Autosaved " + shortenHomePath(e.path)
 	}
 }
 
@@ -2213,8 +2308,11 @@ func (e *editor) draw() {
 	if e.dirty {
 		mark = " *"
 	}
-	cwd, _ := os.Getwd()
-	status := fmt.Sprintf(" %s%s  Ln %d, Col %d  %s  [%s]  %s", name, mark, e.y+1, e.x+1, cwd, e.stats(), e.status)
+	dir := ""
+	if e.path != "" {
+		dir = shortenHomePath(absDir(filepath.Dir(e.path)))
+	}
+	status := fmt.Sprintf(" %s%s  Ln %d, Col %d  %s  [%s]  %s", name, mark, e.y+1, e.x+1, dir, e.stats(), e.status)
 	if e.prompt != "" {
 		status = " " + e.prompt + e.promptValue
 	} else if e.focusMode && !e.statusUntil.IsZero() {
@@ -2496,7 +2594,11 @@ func (e *editor) drawStartMenu(w, h int) {
 		}
 		lines = append(lines, prefix+item.label)
 	}
-	lines = append(lines, "", "Up/Down select   Enter open   Esc return", "F1 help   F3 open   F4 home")
+	footer := "Up/Down select   Enter open   Esc return"
+	if e.startMenuCapture {
+		footer = "Start typing to begin — saves to " + shortenHomePath(absDir(filepath.Dir(e.path)))
+	}
+	lines = append(lines, "", footer, "F1 help   F3 open   F4 home")
 	width := 0
 	for _, line := range lines {
 		width = max(width, min(runeLen(line), max(20, w-8)))

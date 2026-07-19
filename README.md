@@ -27,7 +27,7 @@ Terminal Markdown tools often force a compromise: a raw plain-text editor, a sep
 ## Quick Start
 
 ```sh
-marko                 # new dated note in the current directory (YYYYMMDD_untitled.md)
+marko                 # new dated note in your notes directory (~/Notes by default)
 marko document.md     # open or create a named Markdown file
 ```
 
@@ -131,7 +131,17 @@ Save As (`F2`) and Rename (`Ctrl-Shift-R`) use the same panel: the filename is p
 
 Press `F4` to open the Marko home screen from any document. Use Up/Down and Enter to choose New document, Open / browse, a recent file, Theme, Return to document, or Quit. `Esc` returns to the current document. Recent files are grouped by age on the home screen: past 48 hours, past week, older, and older than 2 weeks.
 
-The picker input also understands zoxide shortcuts and ordinary paths. For an untitled note, Save As starts with `untitled.md` selected, so typing immediately replaces it. Type a zoxide query — multi-word queries work, each word is a zoxide keyword — followed by a filename, all in one go:
+Launching `marko` with no file shows the same home screen over a fresh note — but there, **just start typing**: the first character dismisses the menu and lands in the note (the footer shows where it will save). Letter accelerators only apply to the `F4`-opened menu.
+
+### Quick captures land in one place
+
+`marko` with no arguments creates the note in your **notes directory** — `~/Notes` by default, overridable with the `MARKO_NOTES_DIR` environment variable or a path written to the `marko/notes-dir` config file. Autosave writes there too, so a note dashed off mid-phone-call is always in the same folder, never scattered across whatever directory Marko happened to be launched from. The status bar shows the file's directory, and Save/Autosave flashes the full path.
+
+### Smart save names
+
+Save As for an untitled note pre-fills a filename derived from the note's first line: type `Call with Smith re settlement`, hit `Ctrl-S`, and the picker suggests `YYYYMMDD_call-with-smith-re-settlement.md` — press `Enter` to accept or just type to replace it (the suggestion is pre-selected).
+
+The picker input also understands zoxide shortcuts and ordinary paths. Type a zoxide query — multi-word queries work, each word is a zoxide keyword — followed by a filename, all in one go:
 
 ```text
 z little marco draft
@@ -150,7 +160,7 @@ z briefs<Tab>
 /Users/you/Documents/Briefs/
 ```
 
-If the final path is a directory, Marko uses `untitled.md`; a missing extension becomes `.md`.
+If the final path is a directory, Marko uses the suggested name from the note's first line; a missing extension becomes `.md`.
 
 ## Philosophy
 

@@ -52,7 +52,7 @@ func (e *editor) openFilePicker() {
 
 func (e *editor) openSaveAsPicker() {
 	dir := e.pickerStartDir()
-	name := "untitled.md"
+	name := e.suggestedSaveName(time.Now())
 	if !e.untitled && e.path != "" {
 		name = filepath.Base(e.path)
 	}
@@ -74,8 +74,11 @@ func (e *editor) openRenamePicker() {
 	e.refreshPicker()
 }
 
+// pickerStartDir anchors the picker to the current file's own directory —
+// for untitled notes that is the notes directory, so quick captures never
+// depend on whatever the process working directory happens to be.
 func (e *editor) pickerStartDir() string {
-	if !e.untitled && e.path != "" {
+	if e.path != "" {
 		return absDir(filepath.Dir(e.path))
 	}
 	return absDir(".")

@@ -909,7 +909,7 @@ func TestSavePromptExpandsBareZoxideQueryWithDefaultName(t *testing.T) {
 	e := &editor{lines: []string{"hello"}, untitled: true}
 	e.picker = &picker{mode: pickerSaveAs, dir: t.TempDir(), input: "z briefs", index: -1}
 	e.pickerKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
-	want := filepath.Join(target, "untitled.md")
+	want := filepath.Join(target, e.suggestedSaveName(time.Now()))
 	if e.path != want {
 		t.Fatalf("path = %q, want %q", e.path, want)
 	}
@@ -954,6 +954,65 @@ func TestUniqueUntitledPath(t *testing.T) {
 	}
 	if got, want := uniqueUntitledPath(now, dir), filepath.Join(dir, "20261230_untitled_2.md"); got != want {
 		t.Fatalf("uniqueUntitledPath() = %q, want %q", got, want)
+	}
+}
+
+func TestSlugFromTitle(t *testing.T) {
+	cases := []struct{ line, want string }{
+		{"# Call with Vyas re settlement", "call-with-vyas-re-settlement"},
+		{"  ## Meeting: 10.30am — Mrs Smith  ", "meeting-10-30am-mrs-smith"},
+		{"- [ ] chase disclosure list", "chase-disclosure-list"},
+		{"* bullet note", "bullet-note"},
+		{"> quoted opener", "quoted-opener"},
+		{"**Bold** and _italic_", "bold-and-italic"},
+		{"one two three four five six seven eight nine ten", "one-two-three-four-five-six-seven-eight"},
+		{"---", ""},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := slugFromTitle(c.line); got != c.want {
+			t.Fatalf("slugFromTitle(%q) = %q, want %q", c.line, got, c.want)
+		}
+	}
+}
+
+func TestSuggestedSaveName(t *testing.T) {
+	now := time.Date(2026, 12, 30, 9, 0, 0, 0, time.UTC)
+	e := &editor{lines: []string{"", "---", "# Call with client", "body"}}
+	if got, want := e.suggestedSaveName(now), "20261230_call-with-client.md"; got != want {
+		t.Fatalf("suggestedSaveName() = %q, want %q", got, want)
+	}
+	empty := &editor{lines: []string{"", "  "}}
+	if got, want := empty.suggestedSaveName(now), "20261230_untitled.md"; got != want {
+		t.Fatalf("suggestedSaveName() empty = %q, want %q", got, want)
+	}
+}
+
+func TestStartMenuTypingFallsThroughToNote(t *testing.T) {
+	e := &editor{lines: []string{""}, path: "20260719_untitled.md", untitled: true, showStartMenu: true, startMenuCapture: true}
+	e.key(tcell.NewEventKey(tcell.KeyRune, 'n', 0))
+	if e.showStartMenu {
+		t.Fatal("typing on the launch screen did not dismiss the start menu")
+	}
+	if e.lines[0] != "n" {
+		t.Fatalf("typed rune not inserted into note: lines[0] = %q", e.lines[0])
+	}
+	// The F4-opened menu keeps its accelerators.
+	f4 := &editor{lines: []string{""}, path: "note.md", showStartMenu: true}
+	f4.key(tcell.NewEventKey(tcell.KeyRune, 'n', 0))
+	if !f4.showStartMenu && f4.lines[0] == "n" {
+		t.Fatal("F4 menu accelerator fell through into the document")
+	}
+}
+
+func TestNotesDirEnvOverride(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "captures")
+	t.Setenv("MARKO_NOTES_DIR", dir)
+	if got := notesDir(); got != dir {
+		t.Fatalf("notesDir() = %q, want %q", got, dir)
+	}
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		t.Fatalf("notesDir() did not create %q: %v", dir, err)
 	}
 }
 
@@ -2702,8 +2761,8 @@ func TestUntitledSaveOpensPicker(t *testing.T) {
 	if e.picker == nil || e.picker.mode != pickerSaveAs {
 		t.Fatal("untitled Ctrl-S did not open the Save As picker")
 	}
-	if e.picker.input != "untitled.md" {
-		t.Fatalf("untitled Ctrl-S picker input = %q, want untitled.md", e.picker.input)
+	if want := e.suggestedSaveName(time.Now()); e.picker.input != want {
+		t.Fatalf("untitled Ctrl-S picker input = %q, want %q", e.picker.input, want)
 	}
 	if !e.picker.selectAll {
 		t.Fatal("untitled Ctrl-S did not select the dummy filename")
