@@ -52,12 +52,14 @@ type editor struct {
 	coachUntil      time.Time
 	showStartMenu   bool
 	startMenuIndex  int
-	showRecent      bool
 	recent          []string
-	recentIndex     int
 	renameFrom      string
 	waitingForPaste bool
 	untitled        bool
+	picker          *picker
+	tableGrid       *tableGridPick
+	focusScope      int     // 0 paragraph, 1 section
+	dimStrength     float64 // per-row dim strength set during draw
 }
 
 type snapshot struct {
@@ -83,6 +85,8 @@ type theme struct {
 var themeNames = []string{"calm", "matrix", "midnight", "paper", "ember", "green", "mono", "light", "ia-light", "ia-dark"}
 
 const writingWidth = 88
+
+const maxRecentFiles = 50
 
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "update" {
@@ -294,7 +298,7 @@ func loadRecent() []string {
 				recent = append(recent, path)
 			}
 		}
-		if len(recent) == 5 {
+		if len(recent) == maxRecentFiles {
 			break
 		}
 	}
@@ -311,7 +315,7 @@ func (e *editor) rememberRecent(path string) {
 		if existing != abs {
 			recent = append(recent, existing)
 		}
-		if len(recent) == 5 {
+		if len(recent) == maxRecentFiles {
 			break
 		}
 	}
@@ -381,6 +385,18 @@ func (e *editor) tick() {
 
 func (e *editor) mouse(ev *tcell.EventMouse) {
 	buttons := ev.Buttons()
+	if e.picker != nil {
+		switch {
+		case buttons&(tcell.WheelUp|tcell.Button4) != 0:
+			e.pickerMove(-1)
+		case buttons&(tcell.WheelDown|tcell.Button5) != 0:
+			e.pickerMove(1)
+		}
+		return
+	}
+	if e.tableGrid != nil || e.showStartMenu {
+		return
+	}
 	if buttons&(tcell.WheelUp|tcell.WheelDown|tcell.Button4|tcell.Button5) != 0 {
 		w, h := e.screen.Size()
 		bodyH := max(1, h-1)
@@ -603,8 +619,12 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 	if e.showStartMenu {
 		return e.startMenuKey(ev)
 	}
-	if e.showRecent {
-		e.recentKey(ev)
+	if e.picker != nil {
+		e.pickerKey(ev)
+		return false
+	}
+	if e.tableGrid != nil {
+		e.tableGridKey(ev)
 		return false
 	}
 	if e.prompt != "" && eventKey(ev) == tcell.KeyCtrlQ {
@@ -635,14 +655,14 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		return true
 	case tcell.KeyCtrlS:
 		if ev.Modifiers()&tcell.ModShift != 0 || e.untitled || e.path == "" {
-			e.openSaveAsPrompt()
+			e.openSaveAsPicker()
 		} else {
 			e.save()
 		}
 	case tcell.KeyF2:
-		e.openSaveAsPrompt()
+		e.openSaveAsPicker()
 	case tcell.KeyF3:
-		e.openRecentFiles()
+		e.openFilePicker()
 	case tcell.KeyF4:
 		e.openStartMenu()
 	case tcell.KeyF5:
@@ -660,7 +680,7 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		e.deleteLine()
 	case tcell.KeyCtrlE:
 		if ev.Modifiers()&tcell.ModShift != 0 {
-			e.openRecentFiles()
+			e.openFilePicker()
 		} else {
 			e.checkpoint()
 			e.toggleEmphasis("*", "*")
@@ -690,10 +710,7 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		e.findPrevious()
 	case tcell.KeyCtrlR:
 		if ev.Modifiers()&tcell.ModShift != 0 {
-			e.prompt = "Rename to: "
-			e.promptValue = e.path
-			e.renameFrom = e.path
-			e.promptCursor = runeLen(e.promptValue)
+			e.openRenamePicker()
 		} else if e.search == "" {
 			e.prompt = "Find: "
 			e.promptValue = ""
@@ -715,23 +732,46 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 			e.screen.GetClipboard()
 		}
 	case tcell.KeyCtrlT:
-		e.checkpoint()
-		e.insertTable()
+		if e.inTable(e.y) {
+			e.checkpoint()
+			e.cycleColumnAlignment()
+		} else {
+			e.openTableGrid()
+		}
 	case tcell.KeyF1:
 		e.showHelp = !e.showHelp
 	case tcell.KeyCtrlK:
-		e.focusMode = !e.focusMode
+		if ev.Modifiers()&tcell.ModShift != 0 {
+			e.cycleFocusScope()
+		} else {
+			e.focusMode = !e.focusMode
+		}
 	case tcell.KeyCtrlO:
 		e.openLink()
 	case tcell.KeyCtrlSpace:
 		e.toggleCheckbox()
 	case tcell.KeyUp:
+		if ev.Modifiers()&tcell.ModAlt != 0 && e.inTable(e.y) {
+			e.checkpoint()
+			e.deleteTableRow()
+			break
+		}
 		e.beginKeyboardSelection(ev.Modifiers())
 		e.moveVisualVertical(-1)
 	case tcell.KeyDown:
+		if ev.Modifiers()&tcell.ModAlt != 0 && e.inTable(e.y) {
+			e.checkpoint()
+			e.insertTableRow()
+			break
+		}
 		e.beginKeyboardSelection(ev.Modifiers())
 		e.moveVisualVertical(1)
 	case tcell.KeyLeft:
+		if ev.Modifiers()&tcell.ModAlt != 0 && e.inTable(e.y) {
+			e.checkpoint()
+			e.deleteTableColumn()
+			break
+		}
 		e.beginKeyboardSelection(ev.Modifiers())
 		if e.x > 0 {
 			e.x--
@@ -740,6 +780,11 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 			e.x = runeLen(e.lines[e.y])
 		}
 	case tcell.KeyRight:
+		if ev.Modifiers()&tcell.ModAlt != 0 && e.inTable(e.y) {
+			e.checkpoint()
+			e.insertTableColumn()
+			break
+		}
 		e.beginKeyboardSelection(ev.Modifiers())
 		if e.x < runeLen(e.lines[e.y]) {
 			e.x++
@@ -796,40 +841,17 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 	return false
 }
 
-func (e *editor) recentKey(ev *tcell.EventKey) {
-	switch ev.Key() {
-	case tcell.KeyEsc, tcell.KeyCtrlE:
-		e.showRecent = false
-	case tcell.KeyUp:
-		if e.recentIndex > 0 {
-			e.recentIndex--
-		}
-	case tcell.KeyDown:
-		if e.recentIndex+1 < len(e.recent) {
-			e.recentIndex++
-		}
-	case tcell.KeyEnter:
-		if len(e.recent) == 0 {
-			e.showRecent = false
-			return
-		}
-		e.openFile(e.recent[e.recentIndex])
-	}
-}
-
 func (e *editor) openFile(path string) {
 	if e.dirty {
 		e.save()
 		if e.dirty {
 			e.status = "Could not switch: current file was not saved"
-			e.showRecent = false
 			return
 		}
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		e.status = "Could not open: " + err.Error()
-		e.showRecent = false
 		return
 	}
 	e.path = path
@@ -840,7 +862,7 @@ func (e *editor) openFile(path string) {
 	}
 	e.x, e.y, e.top = 0, 0, 0
 	e.undo, e.redo = nil, nil
-	e.dirty, e.selecting, e.conflict, e.showRecent = false, false, false, false
+	e.dirty, e.selecting, e.conflict = false, false, false
 	if info, err := os.Stat(path); err == nil {
 		e.modTime = info.ModTime()
 	}
@@ -877,8 +899,6 @@ func (e *editor) promptKey(ev *tcell.EventKey) {
 		e.submitPrompt()
 	case tcell.KeyCtrlS:
 		e.submitPrompt()
-	case tcell.KeyTab:
-		e.completePromptPath()
 	case tcell.KeyLeft:
 		if e.promptSelectAll {
 			e.promptSelectAll = false
@@ -966,61 +986,7 @@ func (e *editor) submitPrompt() {
 		e.replaceCurrent()
 		return
 	}
-	if e.prompt == "Rename to: " {
-		e.renameFile(e.promptValue)
-		e.prompt, e.promptValue, e.promptCursor, e.promptSelectAll = "", "", 0, false
-		return
-	}
-	if e.prompt == "Open path: " {
-		path := strings.TrimSpace(e.promptValue)
-		e.prompt, e.promptValue, e.promptCursor, e.promptSelectAll = "", "", 0, false
-		if path == "" {
-			e.status = "Enter a filename"
-			return
-		}
-		expanded, err := expandPathInput(path)
-		if err != nil {
-			e.status = err.Error()
-			return
-		}
-		e.openPath(expanded)
-		return
-	}
-	path := strings.TrimSpace(e.promptValue)
-	if path == "" {
-		e.status = "Enter a filename"
-		return
-	}
-	expanded, err := e.expandSavePathInput(path)
-	if err != nil {
-		e.status = err.Error()
-		return
-	}
-	e.path = expanded
-	e.untitled = false
-	e.conflict = false
-	e.modTime = time.Time{}
 	e.prompt, e.promptValue, e.promptCursor, e.promptSelectAll = "", "", 0, false
-	e.save()
-}
-
-func (e *editor) completePromptPath() {
-	if e.prompt != "Save as: " && e.prompt != "Open path: " {
-		return
-	}
-	value, err := completeZoxidePromptValue(e.promptValue)
-	if err != nil {
-		e.status = err.Error()
-		return
-	}
-	if value == "" {
-		e.status = "Type z query, then Tab"
-		return
-	}
-	e.promptValue = value
-	e.promptCursor = runeLen(value)
-	e.promptSelectAll = false
-	e.status = "Completed zoxide path"
 }
 
 func completeZoxidePromptValue(value string) (string, error) {
@@ -1093,7 +1059,6 @@ func (e *editor) openPath(path string) {
 
 func (e *editor) newFileAt(path string) {
 	e.showStartMenu = false
-	e.showRecent = false
 	e.path = path
 	e.untitled = false
 	e.lines = []string{""}
@@ -1122,7 +1087,7 @@ func (e *editor) startMenuKey(ev *tcell.EventKey) bool {
 	case tcell.KeyF1:
 		e.showHelp = !e.showHelp
 	case tcell.KeyF3:
-		e.activateStartMenuAction("recent")
+		e.activateStartMenuAction("open")
 	case tcell.KeyUp:
 		e.moveStartMenuSelection(-1)
 	case tcell.KeyDown:
@@ -1133,10 +1098,8 @@ func (e *editor) startMenuKey(ev *tcell.EventKey) bool {
 		switch strings.ToLower(string(ev.Rune())) {
 		case "n":
 			e.activateStartMenuAction("new")
-		case "o":
+		case "o", "r":
 			e.activateStartMenuAction("open")
-		case "r":
-			e.activateStartMenuAction("recent")
 		case "t":
 			e.activateStartMenuAction("theme")
 		case "q":
@@ -1160,19 +1123,26 @@ func (e *editor) openStartMenu() {
 	}
 	e.recent = loadRecent()
 	e.showStartMenu = true
-	e.showRecent = false
+	e.picker = nil
+	e.tableGrid = nil
 	e.showHelp = false
 	e.prompt, e.promptValue, e.promptCursor = "", "", 0
 	e.startMenuIndex = 0
 }
 
+func (e *editor) startMenuRecents() []string {
+	if len(e.recent) > 6 {
+		return e.recent[:6]
+	}
+	return e.recent
+}
+
 func (e *editor) startMenuItems() []startMenuItem {
 	items := []startMenuItem{
 		{label: "[N] New document", action: "new", selectable: true},
-		{label: "[O] Open path...", action: "open", selectable: true},
-		{label: "[R] Recent files", action: "recent", selectable: true},
+		{label: "[O] Open / browse...", action: "open", selectable: true},
 	}
-	for _, section := range groupedRecentFiles(e.recent) {
+	for _, section := range groupedRecentFiles(e.startMenuRecents()) {
 		if len(section.entries) == 0 {
 			continue
 		}
@@ -1217,12 +1187,7 @@ func (e *editor) activateStartMenuAction(action string) bool {
 		e.newUntitledDocument()
 	case action == "open":
 		e.showStartMenu = false
-		e.prompt = "Open path: "
-		e.promptValue = ""
-		e.promptCursor = 0
-	case action == "recent":
-		e.openRecentFiles()
-		e.showStartMenu = false
+		e.openFilePicker()
 	case action == "theme":
 		e.cycleTheme()
 	case strings.HasPrefix(action, "open:"):
@@ -1249,27 +1214,8 @@ func (e *editor) newUntitledDocument() {
 	e.updateTerminalTitle()
 }
 
-func (e *editor) openSaveAsPrompt() {
-	e.prompt = "Save as: "
-	if e.untitled || e.path == "" {
-		e.promptValue = "untitled.md"
-		e.promptSelectAll = true
-	} else {
-		e.promptValue = e.path
-		e.promptSelectAll = false
-	}
-	e.promptCursor = runeLen(e.promptValue)
-	e.flashStatus()
-}
-
 func (e *editor) flashStatus() {
 	e.statusUntil = time.Now().Add(3 * time.Second)
-}
-
-func (e *editor) openRecentFiles() {
-	e.recent = loadRecent()
-	e.recentIndex = 0
-	e.showRecent = true
 }
 
 func expandUserPath(path string) string {
@@ -1600,20 +1546,6 @@ func (e *editor) insertText(text string) {
 
 func isURL(text string) bool {
 	return strings.HasPrefix(text, "https://") || strings.HasPrefix(text, "http://")
-}
-
-func (e *editor) insertTable() {
-	r := []rune(e.lines[e.y])
-	before, after := string(r[:e.x]), string(r[e.x:])
-	table := []string{
-		before + "| Heading 1 | Heading 2 |",
-		"| --------- | --------- |",
-		"|           |           |" + after,
-	}
-	e.lines = append(e.lines[:e.y], append(table, e.lines[e.y+1:]...)...)
-	e.x = runeLen(before) + 2
-	e.dirty = true
-	e.status = "Table created. Type a heading, then press Tab."
 }
 
 func (e *editor) insert(s string) {
@@ -2039,6 +1971,13 @@ func (e *editor) tableBounds(y int) (int, int) {
 
 func (e *editor) formatTable() {
 	start, end := e.tableBounds(e.y)
+	aligns := e.tableAlignments(e.y)
+	alignFor := func(col int) int {
+		if col < len(aligns) {
+			return aligns[col]
+		}
+		return 0
+	}
 	rows := make([][]string, end-start+1)
 	widths := []int{}
 	for y := start; y <= end; y++ {
@@ -2052,17 +1991,20 @@ func (e *editor) formatTable() {
 			}
 		}
 	}
+	for i := range widths {
+		widths[i] = max(widths[i], separatorMinWidth(alignFor(i)))
+	}
 	for i, cells := range rows {
 		out := make([]string, len(widths))
 		for col, width := range widths {
 			if isSeparator(e.lines[start+i]) {
-				out[col] = strings.Repeat("-", width)
+				out[col] = alignmentCell(alignFor(col), width)
 			} else {
 				value := ""
 				if col < len(cells) {
 					value = cells[col]
 				}
-				out[col] = value + strings.Repeat(" ", width-runeLen(value))
+				out[col] = padCellAligned(value, width, alignFor(col))
 			}
 		}
 		e.lines[start+i] = "| " + strings.Join(out, " | ") + " |"
@@ -2232,20 +2174,29 @@ func (e *editor) draw() {
 	rows := e.visualRows(contentWidth)
 	cursorRow := e.cursorVisualRow(rows)
 	if !e.manualScroll {
-		if cursorRow < e.top {
-			e.top = cursorRow
-		}
-		if cursorRow >= e.top+bodyH {
-			e.top = cursorRow - bodyH + 1
+		if e.focusMode && bodyH > 4 {
+			// Typewriter scrolling: keep the cursor line vertically centred.
+			e.top = max(0, cursorRow-(bodyH-1)/2)
+		} else {
+			if cursorRow < e.top {
+				e.top = cursorRow
+			}
+			if cursorRow >= e.top+bodyH {
+				e.top = cursorRow - bodyH + 1
+			}
 		}
 	}
 	maxTop := max(0, len(rows)-bodyH)
 	if e.manualScroll {
 		maxTop = manualScrollMaxTop(len(rows))
+	} else if e.focusMode {
+		maxTop = min(cursorRow, manualScrollMaxTop(len(rows)))
 	}
 	e.top = min(max(e.top, 0), maxTop)
+	focusStart, focusEnd := e.focusBounds()
 	for row := 0; row < bodyH && e.top+row < len(rows); row++ {
 		vr := rows[e.top+row]
+		e.dimStrength = dimStrengthFor(vr.y, focusStart, focusEnd)
 		if vr.start < 0 {
 			style := e.focusStyle(tcell.StyleDefault.Background(e.theme.background), e.focusedLine(vr.y))
 			e.put(left, row, strings.Repeat(" ", contentWidth), style, left+contentWidth)
@@ -2253,6 +2204,7 @@ func (e *editor) draw() {
 		}
 		e.drawVisualLine(left, row, vr, e.focusedLine(vr.y), contentWidth)
 	}
+	e.dimStrength = 0
 	name := filepath.Base(e.path)
 	if e.path == "" {
 		name = "Untitled"
@@ -2265,9 +2217,6 @@ func (e *editor) draw() {
 	status := fmt.Sprintf(" %s%s  Ln %d, Col %d  %s  [%s]  %s", name, mark, e.y+1, e.x+1, cwd, e.stats(), e.status)
 	if e.prompt != "" {
 		status = " " + e.prompt + e.promptValue
-		if e.prompt == "Save as: " || e.prompt == "Open path: " {
-			status += "  [z folder filename, or z folder + Tab]"
-		}
 	} else if e.focusMode && !e.statusUntil.IsZero() {
 		status = " " + e.status
 	}
@@ -2277,16 +2226,23 @@ func (e *editor) draw() {
 	if e.showHelp {
 		e.drawHelp(w, h)
 	}
-	if e.showRecent {
-		e.drawRecent(w, h)
+	if e.picker != nil {
+		e.drawPicker(w, h)
+		e.screen.Show()
+		return
 	}
-	if e.showCoach && !e.showHelp && !e.showRecent && e.prompt == "" {
+	if e.tableGrid != nil {
+		e.drawTableGrid(w, h)
+		e.screen.Show()
+		return
+	}
+	if e.showCoach && !e.showHelp && e.prompt == "" {
 		e.drawCoach(w, h)
 	}
 	if e.prompt != "" {
 		e.screen.ShowCursor(1+runeLen(e.prompt)+e.promptCursor, h-1)
 	} else {
-		if e.showStartMenu || e.showRecent || e.showHelp {
+		if e.showStartMenu || e.showHelp {
 			e.screen.HideCursor()
 			e.screen.Show()
 			return
@@ -2394,8 +2350,62 @@ func (e *editor) focusedLine(y int) bool {
 	if !e.focusMode {
 		return y == e.y
 	}
-	start, end := e.paragraphBounds(e.y)
+	start, end := e.focusBounds()
 	return y >= start && y <= end
+}
+
+// focusBounds returns the block that should stay lit in focus mode: the
+// current paragraph, or the whole section under the current heading.
+func (e *editor) focusBounds() (int, int) {
+	if e.focusScope == 1 {
+		return e.sectionBounds(e.y)
+	}
+	return e.paragraphBounds(e.y)
+}
+
+func (e *editor) sectionBounds(y int) (int, int) {
+	if y < 0 || y >= len(e.lines) {
+		return y, y
+	}
+	start := 0
+	for i := y; i >= 0; i-- {
+		if _, _, ok := heading(e.lines[i]); ok {
+			start = i
+			break
+		}
+	}
+	end := len(e.lines) - 1
+	for i := y + 1; i < len(e.lines); i++ {
+		if _, _, ok := heading(e.lines[i]); ok {
+			end = i - 1
+			break
+		}
+	}
+	return start, end
+}
+
+func (e *editor) cycleFocusScope() {
+	e.focusMode = true
+	e.focusScope = (e.focusScope + 1) % 2
+	if e.focusScope == 1 {
+		e.status = "Focus scope: section"
+	} else {
+		e.status = "Focus scope: paragraph"
+	}
+	e.flashStatus()
+}
+
+// dimStrengthFor grades the dim: lines inside the focus block are lit, the
+// lines immediately adjacent get a half-strength dim (a soft edge), and
+// everything else gets the full dim.
+func dimStrengthFor(y, start, end int) float64 {
+	if y >= start && y <= end {
+		return 0
+	}
+	if y == start-1 || y == end+1 {
+		return 0.5
+	}
+	return 1
 }
 
 func (e *editor) drawHelp(w, h int) {
@@ -2405,7 +2415,7 @@ func (e *editor) drawHelp(w, h int) {
 		"F1               Close help",
 		"Ctrl-S           Save",
 		"F2 / Ctrl-Shift-S Save As",
-		"F3 / Ctrl-Shift-E Recent files",
+		"F3 / Ctrl-Shift-E Open / recent files",
 		"F4               Home screen",
 		"Ctrl-Q           Quit",
 		"Ctrl-A           Select all",
@@ -2416,15 +2426,17 @@ func (e *editor) drawHelp(w, h int) {
 		"F5 / F6 / F7     Heading 1 / 2 / 3",
 		"Ctrl-Space       Toggle checkbox",
 		"Ctrl-O           Link selection",
-		"Ctrl-T           Create table",
+		"Ctrl-T           Insert table / cycle column alignment",
+		"Alt-Down/Up      Table: add / delete row",
+		"Alt-Right/Left   Table: add / delete column",
 		"Ctrl-F/N/P       Find / next / previous",
 		"Ctrl-R           Replace",
 		"Ctrl-Shift-R     Rename file",
 		"Ctrl-Z/Y         Undo / redo",
 		"Ctrl-K           Focus mode",
-		"Ctrl-Shift-E     Recent files",
+		"Ctrl-Shift-K     Focus scope (paragraph/section)",
 		"Ctrl-G           Cycle theme",
-		"Open/Save path   Use z query/file.md, or type a path",
+		"Picker           Type to filter, z query + Tab jumps",
 	}
 	width := 0
 	for _, line := range lines {
@@ -2484,7 +2496,7 @@ func (e *editor) drawStartMenu(w, h int) {
 		}
 		lines = append(lines, prefix+item.label)
 	}
-	lines = append(lines, "", "Up/Down select   Enter open   Esc return", "F1 help   F3 recent   F4 home")
+	lines = append(lines, "", "Up/Down select   Enter open   Esc return", "F1 help   F3 open   F4 home")
 	width := 0
 	for _, line := range lines {
 		width = max(width, min(runeLen(line), max(20, w-8)))
@@ -2512,7 +2524,7 @@ func (e *editor) drawStartMenu(w, h int) {
 				case item.section:
 					style = style.Bold(true)
 				case strings.HasPrefix(item.action, "open:"):
-					style = e.recentStyle(style, item.recentRank, recentItemCount(groupedRecentFiles(e.recent)))
+					style = e.recentStyle(style, item.recentRank, recentItemCount(groupedRecentFiles(e.startMenuRecents())))
 				}
 			}
 		}
@@ -2538,82 +2550,6 @@ func markoWordmark(maxWidth int) []string {
 		return art
 	}
 	return []string{"MARKO"}
-}
-
-func (e *editor) drawRecent(w, h int) {
-	e.recent = loadRecent()
-	sections := groupedRecentFiles(e.recent)
-	total := 0
-	for _, section := range sections {
-		total += len(section.entries)
-	}
-	if total > 0 && e.recentIndex >= total {
-		e.recentIndex = 0
-	}
-	lines, total := e.recentPanelLines(sections, max(24, w-6))
-	width := 0
-	for _, line := range lines {
-		width = max(width, min(runeLen(line.text), max(20, w-6)))
-	}
-	x, y := max(0, (w-width-4)/2), max(0, (h-len(lines)-2)/2)
-	box := tcell.StyleDefault.Background(e.theme.statusBG).Foreground(e.theme.statusFG)
-	for row := 0; row < len(lines)+2 && y+row < h; row++ {
-		e.put(x, y+row, strings.Repeat(" ", min(w-x, width+4)), box, w)
-	}
-	for row, line := range lines {
-		style := box
-		switch line.kind {
-		case recentLineSection, recentLineTitle:
-			style = style.Bold(true)
-		case recentLineEntry:
-			style = e.recentStyle(style, line.rank, total)
-		}
-		e.put(x+2, y+1+row, line.text, style, min(w, x+2+width))
-	}
-}
-
-func (e *editor) recentPanelLines(sections []recentFileSection, width int) ([]recentPanelLine, int) {
-	lines := []recentPanelLine{{text: " Recent Markdown files ", kind: recentLineTitle}}
-	total := 0
-	for _, section := range sections {
-		if len(section.entries) == 0 {
-			continue
-		}
-		lines = append(lines, recentPanelLine{text: " " + section.title + " ", kind: recentLineSection})
-		for _, entry := range section.entries {
-			prefix := "  "
-			if entry.rank == e.recentIndex {
-				prefix = "> "
-			}
-			lines = append(lines, recentPanelLine{
-				text: prefix + recentDisplayLabel(entry.path, width),
-				kind: recentLineEntry,
-				rank: entry.rank,
-			})
-			total++
-		}
-	}
-	if total == 0 {
-		lines = append(lines, recentPanelLine{text: "  <No recent files>", kind: recentLineEntry})
-	}
-	lines = append(lines, recentPanelLine{text: " Up/Down select   Enter open ", kind: recentLineSpacer})
-	lines = append(lines, recentPanelLine{text: " Esc cancel ", kind: recentLineSpacer})
-	return lines, total
-}
-
-type recentPanelLineKind int
-
-const (
-	recentLineTitle recentPanelLineKind = iota
-	recentLineSection
-	recentLineEntry
-	recentLineSpacer
-)
-
-type recentPanelLine struct {
-	text string
-	kind recentPanelLineKind
-	rank int
 }
 
 type recentFileSection struct {
@@ -3405,7 +3341,46 @@ func (e *editor) focusStyle(style tcell.Style, current bool) tcell.Style {
 	if current {
 		return style.Background(e.theme.focusBG)
 	}
+	strength := e.dimStrength
+	if strength <= 0 {
+		strength = 1
+	}
+	fg, _, _ := style.Decompose()
+	if !fg.Valid() {
+		fg = e.theme.text
+	}
+	target := e.theme.dimBG
+	if !target.Valid() {
+		target = e.theme.background
+	}
+	if !target.Valid() {
+		// Terminal-default background: recede toward the theme's muted tone
+		// instead, which still preserves each colour's hue.
+		target = e.theme.muted
+	}
+	if fg.Valid() && target.Valid() {
+		// Recede the text toward the page rather than repainting it a flat
+		// grey: each colour keeps its hue, so headings still read as headings.
+		out := style.Foreground(blendColor(fg, target, 0.65*strength))
+		if e.theme.dimBG.Valid() {
+			out = out.Background(e.theme.dimBG)
+		}
+		return out
+	}
+	// Terminal-default colours cannot be blended; fall back to the muted tone.
 	return style.Foreground(e.theme.muted).Background(e.theme.dimBG)
+}
+
+// blendColor mixes from toward to by t (0 = from, 1 = to). Colours that
+// cannot be resolved to RGB are returned unchanged.
+func blendColor(from, to tcell.Color, t float64) tcell.Color {
+	fr, fg, fb := from.RGB()
+	tr, tg, tb := to.RGB()
+	if fr < 0 || tr < 0 {
+		return from
+	}
+	lerp := func(a, b int32) int32 { return a + int32(float64(b-a)*t) }
+	return tcell.NewRGBColor(lerp(fr, tr), lerp(fg, tg), lerp(fb, tb))
 }
 
 func (e *editor) highlightStyle(style tcell.Style) tcell.Style {
@@ -3510,13 +3485,20 @@ func (e *editor) renderTableLine(y int, maxWidths ...int) string {
 		return "├" + strings.Join(parts, "┼") + "┤"
 	}
 
+	aligns := e.tableAlignments(y)
 	parts := make([]string, len(widths))
 	for col, width := range widths {
 		value := ""
 		if col < len(cells) {
 			value = truncateInlineCell(cells[col], width)
 		}
-		parts[col] = " " + value + strings.Repeat(" ", width-inlineDisplayWidth(value)+1)
+		align := 0
+		if col < len(aligns) {
+			align = aligns[col]
+		}
+		padLeft := inlinePadLeft(value, width, align)
+		padRight := max(0, width-inlineDisplayWidth(value)-padLeft)
+		parts[col] = " " + strings.Repeat(" ", padLeft) + value + strings.Repeat(" ", padRight+1)
 	}
 	return "│" + strings.Join(parts, "│") + "│"
 }
@@ -3529,6 +3511,7 @@ func (e *editor) drawTableLine(left, row, y, maxWidth int, style tcell.Style) {
 	}
 
 	cells := splitTable(e.lines[y])
+	aligns := e.tableAlignments(y)
 	x := left
 	e.screen.SetContent(x, row, '│', nil, style)
 	x++
@@ -3539,7 +3522,12 @@ func (e *editor) drawTableLine(left, row, y, maxWidth int, style tcell.Style) {
 		if col < len(cells) {
 			value = truncateInlineCell(cells[col], width)
 		}
-		e.putInline(x, row, value, style, x+width, y, 0)
+		align := 0
+		if col < len(aligns) {
+			align = aligns[col]
+		}
+		e.put(x, row, strings.Repeat(" ", width), style, x+width)
+		e.putInline(x+inlinePadLeft(value, width, align), row, value, style, x+width, y, 0)
 		x += width
 		e.screen.SetContent(x, row, ' ', nil, style)
 		x++

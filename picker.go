@@ -1,0 +1,629 @@
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/gdamore/tcell/v2"
+)
+
+// The picker is a single overlay reused for opening, saving, and renaming
+// files: a text input on top, a fuzzy-filtered list of recents and directory
+// entries below. Enter on a directory descends into it; Backspace on an
+// empty input goes up one level; "z query" plus Tab jumps via zoxide.
+
+type pickerMode int
+
+const (
+	pickerOpen pickerMode = iota
+	pickerSaveAs
+	pickerRename
+)
+
+type pickerItem struct {
+	name    string // basename shown and matched against
+	path    string // absolute path
+	dir     bool
+	recent  bool
+	modTime time.Time
+}
+
+type picker struct {
+	mode      pickerMode
+	dir       string // directory being browsed / saved into
+	input     string
+	cursor    int
+	selectAll bool
+	index     int // -1 = input row focused; >= 0 selects a list row
+	items     []pickerItem
+	err       string
+}
+
+var pickerFileExtensions = map[string]bool{".md": true, ".markdown": true, ".txt": true}
+
+func (e *editor) openFilePicker() {
+	dir := e.pickerStartDir()
+	e.picker = &picker{mode: pickerOpen, dir: dir, index: 0}
+	e.refreshPicker()
+}
+
+func (e *editor) openSaveAsPicker() {
+	dir := e.pickerStartDir()
+	name := "untitled.md"
+	if !e.untitled && e.path != "" {
+		name = filepath.Base(e.path)
+	}
+	e.picker = &picker{mode: pickerSaveAs, dir: dir, input: name, cursor: runeLen(name), selectAll: true, index: -1}
+	e.refreshPicker()
+	e.flashStatus()
+}
+
+func (e *editor) openRenamePicker() {
+	if e.path == "" {
+		return
+	}
+	// Anchor renames to the file's own directory so a bare name never moves
+	// the file into whatever the process working directory happens to be.
+	dir := absDir(filepath.Dir(e.path))
+	name := filepath.Base(e.path)
+	e.renameFrom = e.path
+	e.picker = &picker{mode: pickerRename, dir: dir, input: name, cursor: runeLen(name), selectAll: true, index: -1}
+	e.refreshPicker()
+}
+
+func (e *editor) pickerStartDir() string {
+	if !e.untitled && e.path != "" {
+		return absDir(filepath.Dir(e.path))
+	}
+	return absDir(".")
+}
+
+func absDir(dir string) string {
+	if abs, err := filepath.Abs(dir); err == nil {
+		return abs
+	}
+	return dir
+}
+
+func (e *editor) refreshPicker() {
+	p := e.picker
+	if p == nil {
+		return
+	}
+	p.items = p.items[:0]
+	if p.mode == pickerOpen {
+		for _, path := range loadRecent() {
+			if filepath.Dir(path) == p.dir {
+				continue // shown as a directory entry below
+			}
+			item := pickerItem{name: filepath.Base(path), path: path, recent: true}
+			if info, err := os.Stat(path); err == nil {
+				item.modTime = info.ModTime()
+			}
+			p.items = append(p.items, item)
+		}
+	}
+	p.items = append(p.items, listPickerDir(p.dir)...)
+}
+
+func listPickerDir(dir string) []pickerItem {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var dirs, files []pickerItem
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		path := filepath.Join(dir, name)
+		if entry.IsDir() {
+			dirs = append(dirs, pickerItem{name: name, path: path, dir: true})
+			continue
+		}
+		if !pickerFileExtensions[strings.ToLower(filepath.Ext(name))] {
+			continue
+		}
+		item := pickerItem{name: name, path: path}
+		if info, err := entry.Info(); err == nil {
+			item.modTime = info.ModTime()
+		}
+		files = append(files, item)
+	}
+	sort.Slice(dirs, func(i, j int) bool { return dirs[i].name < dirs[j].name })
+	sort.Slice(files, func(i, j int) bool {
+		if !files[i].modTime.Equal(files[j].modTime) {
+			return files[i].modTime.After(files[j].modTime)
+		}
+		return files[i].name < files[j].name
+	})
+	return append(dirs, files...)
+}
+
+// fuzzyScore reports whether pattern is a case-insensitive subsequence of
+// text, and how good the match is: consecutive runs and word starts score
+// higher, and matches beginning earlier win ties.
+func fuzzyScore(pattern, text string) (int, bool) {
+	if pattern == "" {
+		return 0, true
+	}
+	p := []rune(strings.ToLower(pattern))
+	t := []rune(strings.ToLower(text))
+	score, pi, streak := 0, 0, 0
+	for ti := 0; ti < len(t) && pi < len(p); ti++ {
+		if t[ti] != p[pi] {
+			streak = 0
+			continue
+		}
+		streak++
+		score += 1 + streak
+		if ti == 0 || t[ti-1] == '/' || t[ti-1] == ' ' || t[ti-1] == '_' || t[ti-1] == '-' || t[ti-1] == '.' {
+			score += 4
+		}
+		if pi == 0 {
+			score -= ti / 4 // earlier first matches rank higher
+		}
+		pi++
+	}
+	if pi < len(p) {
+		return 0, false
+	}
+	return score, true
+}
+
+func (p *picker) matchText(item pickerItem) string {
+	if item.recent {
+		return shortenHomePath(item.path)
+	}
+	return item.name
+}
+
+func (p *picker) visibleItems() []pickerItem {
+	if strings.TrimSpace(p.input) == "" || strings.HasPrefix(p.input, "z ") {
+		return p.items
+	}
+	type scored struct {
+		item  pickerItem
+		score int
+	}
+	var matches []scored
+	for _, item := range p.items {
+		if score, ok := fuzzyScore(p.input, p.matchText(item)); ok {
+			matches = append(matches, scored{item, score})
+		}
+	}
+	sort.SliceStable(matches, func(i, j int) bool { return matches[i].score > matches[j].score })
+	out := make([]pickerItem, len(matches))
+	for i, m := range matches {
+		out[i] = m.item
+	}
+	return out
+}
+
+func (p *picker) clampIndex(visible int) {
+	minIndex := 0
+	if p.mode != pickerOpen {
+		minIndex = -1
+	}
+	if p.index < minIndex {
+		p.index = minIndex
+	}
+	if p.index >= visible {
+		p.index = visible - 1
+	}
+	if p.index < 0 && p.mode == pickerOpen {
+		p.index = 0
+	}
+}
+
+func (e *editor) pickerMove(delta int) {
+	p := e.picker
+	visible := len(p.visibleItems())
+	p.index += delta
+	p.clampIndex(visible)
+	p.selectAll = false
+}
+
+func (e *editor) pickerKey(ev *tcell.EventKey) {
+	p := e.picker
+	switch eventKey(ev) {
+	case tcell.KeyEsc, tcell.KeyCtrlQ:
+		e.picker = nil
+		e.renameFrom = ""
+		e.status = "Cancelled"
+	case tcell.KeyUp:
+		e.pickerMove(-1)
+	case tcell.KeyDown:
+		e.pickerMove(1)
+	case tcell.KeyPgUp:
+		e.pickerMove(-10)
+	case tcell.KeyPgDn:
+		e.pickerMove(10)
+	case tcell.KeyEnter:
+		e.pickerSubmit()
+	case tcell.KeyTab:
+		e.pickerTab()
+	case tcell.KeyLeft:
+		p.selectAll = false
+		if p.cursor > 0 {
+			p.cursor--
+		}
+	case tcell.KeyRight:
+		p.selectAll = false
+		if p.cursor < runeLen(p.input) {
+			p.cursor++
+		}
+	case tcell.KeyHome:
+		p.selectAll, p.cursor = false, 0
+	case tcell.KeyEnd:
+		p.selectAll, p.cursor = false, runeLen(p.input)
+	case tcell.KeyBackspace, tcell.KeyBackspace2:
+		if p.selectAll {
+			p.input, p.cursor, p.selectAll = "", 0, false
+			e.pickerInputChanged()
+			return
+		}
+		if p.input == "" {
+			e.pickerAscend()
+			return
+		}
+		r := []rune(p.input)
+		if p.cursor > 0 && p.cursor <= len(r) {
+			p.input = string(r[:p.cursor-1]) + string(r[p.cursor:])
+			p.cursor--
+			e.pickerInputChanged()
+		}
+	case tcell.KeyDelete:
+		if p.selectAll {
+			p.input, p.cursor, p.selectAll = "", 0, false
+			e.pickerInputChanged()
+			return
+		}
+		r := []rune(p.input)
+		if p.cursor < len(r) {
+			p.input = string(r[:p.cursor]) + string(r[p.cursor+1:])
+			e.pickerInputChanged()
+		}
+	case tcell.KeyRune:
+		if !textInputModifiers(ev.Modifiers()) {
+			return
+		}
+		if p.selectAll {
+			p.input, p.cursor, p.selectAll = string(ev.Rune()), 1, false
+			e.pickerInputChanged()
+			return
+		}
+		r := []rune(p.input)
+		p.input = string(r[:p.cursor]) + string(ev.Rune()) + string(r[p.cursor:])
+		p.cursor++
+		e.pickerInputChanged()
+	}
+}
+
+func (e *editor) pickerInputChanged() {
+	p := e.picker
+	p.err = ""
+	if p.mode == pickerOpen {
+		p.index = 0
+	} else {
+		p.index = -1
+	}
+}
+
+func (e *editor) pickerAscend() {
+	p := e.picker
+	parent := filepath.Dir(p.dir)
+	if parent == p.dir {
+		return
+	}
+	p.dir = parent
+	p.index = 0
+	if p.mode != pickerOpen {
+		p.index = -1
+	}
+	e.refreshPicker()
+}
+
+func (e *editor) pickerDescend(dir string) {
+	p := e.picker
+	p.dir = dir
+	p.input, p.cursor, p.selectAll = "", 0, false
+	p.index = 0
+	if p.mode != pickerOpen {
+		p.index = -1
+	}
+	e.refreshPicker()
+}
+
+func (e *editor) pickerTab() {
+	p := e.picker
+	if strings.HasPrefix(strings.TrimSpace(p.input), "z ") {
+		value, err := completeZoxidePromptValue(p.input)
+		if err != nil {
+			p.err = err.Error()
+			return
+		}
+		if value == "" {
+			p.err = "Type z query, then Tab"
+			return
+		}
+		if strings.HasSuffix(value, string(os.PathSeparator)) {
+			e.pickerDescend(filepath.Clean(value))
+			return
+		}
+		p.input = value
+		p.cursor = runeLen(value)
+		p.selectAll = false
+		return
+	}
+	visible := p.visibleItems()
+	if p.index >= 0 && p.index < len(visible) && visible[p.index].dir {
+		e.pickerDescend(visible[p.index].path)
+	}
+}
+
+func (e *editor) pickerSubmit() {
+	p := e.picker
+	visible := p.visibleItems()
+	if p.index >= 0 && p.index < len(visible) {
+		item := visible[p.index]
+		if item.dir {
+			e.pickerDescend(item.path)
+			return
+		}
+		if p.mode == pickerOpen {
+			e.picker = nil
+			e.openFile(item.path)
+			return
+		}
+		// Save As / Rename: adopt the highlighted file's name into the input.
+		p.input = item.name
+		p.cursor = runeLen(item.name)
+		p.selectAll = false
+		p.index = -1
+		return
+	}
+	input := strings.TrimSpace(p.input)
+	if input == "" {
+		p.err = "Enter a filename"
+		return
+	}
+	switch p.mode {
+	case pickerOpen:
+		expanded, err := expandPathInput(input)
+		if err != nil {
+			p.err = err.Error()
+			return
+		}
+		if !filepath.IsAbs(expanded) {
+			expanded = filepath.Join(p.dir, expanded)
+		}
+		e.picker = nil
+		e.openPath(expanded)
+	case pickerSaveAs:
+		expanded, err := e.expandSavePathInput(input)
+		if err != nil {
+			p.err = err.Error()
+			return
+		}
+		if !filepath.IsAbs(expanded) {
+			expanded = filepath.Join(p.dir, expanded)
+		}
+		e.picker = nil
+		e.path = expanded
+		e.untitled = false
+		e.conflict = false
+		e.modTime = time.Time{}
+		e.save()
+	case pickerRename:
+		if filepath.Ext(input) == "" {
+			input += ".md"
+		}
+		target := input
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(p.dir, target)
+		}
+		if target != e.renameFrom {
+			if _, err := os.Stat(target); err == nil {
+				p.err = filepath.Base(target) + " already exists"
+				return
+			}
+		}
+		e.picker = nil
+		e.renameFile(target)
+	}
+}
+
+func shortenHomePath(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return path
+	}
+	if path == home {
+		return "~"
+	}
+	if strings.HasPrefix(path, home+string(os.PathSeparator)) {
+		return "~" + path[len(home):]
+	}
+	return path
+}
+
+func (p *picker) title() string {
+	switch p.mode {
+	case pickerSaveAs:
+		return "Save as"
+	case pickerRename:
+		return "Rename"
+	}
+	return "Open"
+}
+
+func (p *picker) footerHint() string {
+	if p.mode == pickerOpen {
+		return "Enter open · Tab into folder · Backspace up · z query Tab · Esc cancel"
+	}
+	return "Enter save · Up/Down browse · Backspace up · Esc cancel"
+}
+
+// pickerCollision reports a warning when committing the current input would
+// overwrite an existing file.
+func (p *picker) collision(renameFrom string) string {
+	if p.mode == pickerOpen {
+		return ""
+	}
+	input := strings.TrimSpace(p.input)
+	if input == "" || strings.HasPrefix(input, "z ") {
+		return ""
+	}
+	if filepath.Ext(input) == "" {
+		input += ".md"
+	}
+	target := input
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(p.dir, target)
+	}
+	if target == renameFrom {
+		return ""
+	}
+	if info, err := os.Stat(target); err == nil && !info.IsDir() {
+		if p.mode == pickerRename {
+			return filepath.Base(target) + " already exists"
+		}
+		return "overwrites " + filepath.Base(target)
+	}
+	return ""
+}
+
+type pickerRow struct {
+	text    string
+	header  bool
+	itemIdx int // index into visibleItems, -1 for headers
+}
+
+func (e *editor) pickerRows(visible []pickerItem, width int) []pickerRow {
+	p := e.picker
+	rows := []pickerRow{}
+	showHeaders := p.mode == pickerOpen && strings.TrimSpace(p.input) == ""
+	lastRecent := false
+	for i, item := range visible {
+		if showHeaders {
+			if i == 0 && item.recent {
+				rows = append(rows, pickerRow{text: "Recent", header: true, itemIdx: -1})
+			}
+			if (i == 0 && !item.recent) || (lastRecent && !item.recent) {
+				rows = append(rows, pickerRow{text: "This folder", header: true, itemIdx: -1})
+			}
+			lastRecent = item.recent
+		}
+		label := item.name
+		if item.dir {
+			label += string(os.PathSeparator)
+		}
+		if item.recent {
+			label = truncatePathMiddle(shortenHomePath(item.path), width-20)
+		}
+		if !item.dir && !item.modTime.IsZero() {
+			label += "  · " + item.modTime.Format("2006-01-02 15:04")
+		}
+		if runeLen(label) > width {
+			label = truncatePathMiddle(label, width)
+		}
+		rows = append(rows, pickerRow{text: label, itemIdx: i})
+	}
+	return rows
+}
+
+func (e *editor) drawPicker(w, h int) {
+	p := e.picker
+	boxWidth := min(w-4, 92)
+	if boxWidth < 24 {
+		boxWidth = min(24, w)
+	}
+	inner := boxWidth - 4
+	visible := p.visibleItems()
+	rows := e.pickerRows(visible, inner-2)
+
+	maxList := max(3, h-9)
+	// Keep the selected row inside the window.
+	selectedRow := 0
+	for i, row := range rows {
+		if row.itemIdx == p.index {
+			selectedRow = i
+			break
+		}
+	}
+	start := 0
+	if len(rows) > maxList {
+		start = min(max(0, selectedRow-maxList/2), len(rows)-maxList)
+	}
+	listRows := rows[start:min(len(rows), start+maxList)]
+
+	boxHeight := len(listRows) + 6
+	x := max(0, (w-boxWidth)/2)
+	y := max(0, (h-boxHeight)/2)
+	box := tcell.StyleDefault.Background(e.theme.statusBG).Foreground(e.theme.statusFG)
+	for row := 0; row < boxHeight && y+row < h; row++ {
+		e.put(x, y+row, strings.Repeat(" ", min(w-x, boxWidth)), box, w)
+	}
+
+	title := " " + p.title() + " — " + truncatePathMiddle(shortenHomePath(p.dir), inner-runeLen(p.title())-4) + " "
+	e.put(x+1, y, title, box.Bold(true), x+boxWidth-1)
+
+	inputStyle := box
+	if p.selectAll {
+		inputStyle = e.selectedStyle(box)
+	}
+	prompt := "> "
+	e.put(x+2, y+2, prompt, box, x+boxWidth-2)
+	inputText := p.input
+	if runeLen(inputText) > inner-2 {
+		r := []rune(inputText)
+		inputText = string(r[len(r)-(inner-2):])
+	}
+	e.put(x+2+runeLen(prompt), y+2, inputText+strings.Repeat(" ", max(0, inner-2-runeLen(inputText))), inputStyle, x+boxWidth-2)
+
+	listTop := y + 4
+	total := recentItemCount(groupedRecentFiles(loadRecent()))
+	for i, row := range listRows {
+		style := box
+		prefix := "  "
+		switch {
+		case row.header:
+			style = style.Bold(true)
+		case row.itemIdx == p.index:
+			prefix = "> "
+			style = e.selectedStyle(style)
+		case visible[row.itemIdx].dir:
+			style = style.Foreground(e.theme.accent1)
+		case visible[row.itemIdx].recent:
+			style = e.recentStyle(style, row.itemIdx, max(total, len(visible)))
+		}
+		e.put(x+2, listTop+i, prefix+row.text, style, x+boxWidth-2)
+	}
+	if len(listRows) == 0 {
+		empty := "<empty folder>"
+		if p.mode == pickerOpen && strings.TrimSpace(p.input) != "" {
+			empty = "<no matches — Enter creates \"" + strings.TrimSpace(p.input) + "\">"
+		}
+		e.put(x+2, listTop, empty, box, x+boxWidth-2)
+	}
+
+	footer := p.footerHint()
+	if warning := p.collision(e.renameFrom); warning != "" {
+		footer = warning
+	}
+	if p.err != "" {
+		footer = p.err
+	}
+	e.put(x+2, y+boxHeight-1, truncatePathMiddle(footer, inner), box, x+boxWidth-2)
+
+	if p.index < 0 || p.mode == pickerOpen {
+		e.screen.ShowCursor(x+2+runeLen(prompt)+min(p.cursor, runeLen(inputText)), y+2)
+	} else {
+		e.screen.HideCursor()
+	}
+}

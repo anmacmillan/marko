@@ -55,19 +55,33 @@ func TestInsertLine(t *testing.T) {
 	}
 }
 
-func TestInsertTable(t *testing.T) {
+func TestInsertSizedTable(t *testing.T) {
 	e := &editor{lines: []string{"before after"}, x: 7}
-	e.insertTable()
+	e.insertSizedTable(2, 2)
 	want := []string{
 		"before | Heading 1 | Heading 2 |",
 		"| --------- | --------- |",
 		"|           |           |after",
 	}
 	if !reflect.DeepEqual(e.lines, want) {
-		t.Fatalf("insertTable() = %#v, want %#v", e.lines, want)
+		t.Fatalf("insertSizedTable() = %#v, want %#v", e.lines, want)
 	}
 	if e.x != 9 {
 		t.Fatalf("cursor X = %d, want 9", e.x)
+	}
+}
+
+func TestInsertSizedTableLargerGrid(t *testing.T) {
+	e := &editor{lines: []string{""}}
+	e.insertSizedTable(4, 3)
+	if len(e.lines) != 5 {
+		t.Fatalf("4x3 table lines = %d, want 5", len(e.lines))
+	}
+	if !isSeparator(e.lines[1]) {
+		t.Fatalf("second line is not a separator: %q", e.lines[1])
+	}
+	if got := len(splitTable(e.lines[0])); got != 3 {
+		t.Fatalf("header columns = %d, want 3", got)
 	}
 }
 
@@ -851,20 +865,26 @@ func TestClosingRune(t *testing.T) {
 	}
 }
 
-func TestSavePromptAddsMarkdownExtension(t *testing.T) {
-	e := &editor{lines: []string{"hello"}, prompt: "Save as: ", promptValue: "note"}
-	e.promptKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
-	if e.path != "note.md" {
-		t.Fatalf("path = %q, want note.md", e.path)
+func TestSavePickerAddsMarkdownExtension(t *testing.T) {
+	dir := t.TempDir()
+	e := &editor{lines: []string{"hello"}}
+	e.picker = &picker{mode: pickerSaveAs, dir: dir, input: "note", index: -1}
+	e.pickerKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	want := filepath.Join(dir, "note.md")
+	if e.path != want {
+		t.Fatalf("path = %q, want %q", e.path, want)
 	}
-	_ = os.Remove("note.md")
+	if e.picker != nil {
+		t.Fatal("picker stayed open after save")
+	}
 }
 
-func TestSavePromptExpandsHomeDirectory(t *testing.T) {
+func TestSavePickerExpandsHomeDirectory(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	e := &editor{lines: []string{"hello"}, prompt: "Save as: ", promptValue: "~/drafts/note"}
-	e.promptKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	e := &editor{lines: []string{"hello"}}
+	e.picker = &picker{mode: pickerSaveAs, dir: t.TempDir(), input: "~/drafts/note", index: -1}
+	e.pickerKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
 	want := filepath.Join(home, "drafts", "note.md")
 	if e.path != want {
 		t.Fatalf("path = %q, want %q", e.path, want)
@@ -886,8 +906,9 @@ func TestSavePromptExpandsBareZoxideQueryWithDefaultName(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)
-	e := &editor{lines: []string{"hello"}, prompt: "Save as: ", promptValue: "z briefs", untitled: true}
-	e.promptKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	e := &editor{lines: []string{"hello"}, untitled: true}
+	e.picker = &picker{mode: pickerSaveAs, dir: t.TempDir(), input: "z briefs", index: -1}
+	e.pickerKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
 	want := filepath.Join(target, "untitled.md")
 	if e.path != want {
 		t.Fatalf("path = %q, want %q", e.path, want)
@@ -898,7 +919,7 @@ func TestSavePromptExpandsBareZoxideQueryWithDefaultName(t *testing.T) {
 }
 
 func TestPromptSupportsMiddleEditing(t *testing.T) {
-	e := &editor{prompt: "Save as: ", promptValue: "untitled.md", promptCursor: runeLen("untitled.md")}
+	e := &editor{prompt: "Replace with: ", promptValue: "untitled.md", promptCursor: runeLen("untitled.md")}
 	e.promptKey(tcell.NewEventKey(tcell.KeyHome, 0, tcell.ModNone))
 	if e.promptCursor != 0 {
 		t.Fatalf("home cursor = %d, want 0", e.promptCursor)
@@ -1372,7 +1393,7 @@ func TestLoadRecentFiltersMissingAndLimitsFive(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := loadRecent()
-	if len(got) != 5 || got[0] != paths[1] || got[1] != paths[2] {
+	if len(got) != 6 || got[0] != paths[1] || got[1] != paths[2] {
 		t.Fatalf("loadRecent() = %#v", got)
 	}
 }
@@ -1664,11 +1685,11 @@ func TestCtrlEItalicKeybindAndRecentOnShift(t *testing.T) {
 	if got, want := e.lines[0], "*plain*"; got != want {
 		t.Fatalf("Ctrl-E italic: line = %q, want %q", got, want)
 	}
-	// Ctrl-Shift-E opens the recent panel rather than toggling italic.
+	// Ctrl-Shift-E opens the file picker rather than toggling italic.
 	e2 := &editor{lines: []string{"plain"}}
 	e2.key(tcell.NewEventKey(tcell.KeyCtrlE, 0, tcell.ModCtrl|tcell.ModShift))
-	if !e2.showRecent {
-		t.Fatal("Ctrl-Shift-E did not open recent files")
+	if e2.picker == nil || e2.picker.mode != pickerOpen {
+		t.Fatal("Ctrl-Shift-E did not open the file picker")
 	}
 	if got := e2.lines[0]; got != "plain" {
 		t.Fatalf("Ctrl-Shift-E mutated text: %q", got)
@@ -1737,22 +1758,25 @@ func TestCtrlASelectAll(t *testing.T) {
 	}
 }
 
-func TestF2OpensSaveAsPrompt(t *testing.T) {
+func TestF2OpensSaveAsPicker(t *testing.T) {
 	e := &editor{lines: []string{"x"}, path: "named.md", untitled: false}
 	e.key(tcell.NewEventKey(tcell.KeyF2, 0, tcell.ModNone))
-	if e.prompt != "Save as: " {
-		t.Fatalf("F2 prompt = %q, want Save as: ", e.prompt)
+	if e.picker == nil || e.picker.mode != pickerSaveAs {
+		t.Fatal("F2 did not open the Save As picker")
 	}
-	if e.promptValue != "named.md" {
-		t.Fatalf("F2 promptValue = %q, want named.md", e.promptValue)
+	if e.picker.input != "named.md" {
+		t.Fatalf("F2 picker input = %q, want named.md", e.picker.input)
+	}
+	if !e.picker.selectAll {
+		t.Fatal("F2 did not pre-select the filename")
 	}
 }
 
-func TestF3OpensRecentFiles(t *testing.T) {
+func TestF3OpensFilePicker(t *testing.T) {
 	e := &editor{lines: []string{"x"}}
 	e.key(tcell.NewEventKey(tcell.KeyF3, 0, tcell.ModNone))
-	if !e.showRecent {
-		t.Fatal("F3 did not open recent files")
+	if e.picker == nil || e.picker.mode != pickerOpen {
+		t.Fatal("F3 did not open the file picker")
 	}
 }
 
@@ -1771,7 +1795,7 @@ func TestHelpRendersAlignedShortcutColumns(t *testing.T) {
 		rendered.WriteByte('\n')
 	}
 	text := rendered.String()
-	for _, want := range []string{"F2", "Save As", "F3", "Recent files", "F5", "Heading 1", "Ctrl-Shift-S", "Select all"} {
+	for _, want := range []string{"F2", "Save As", "F3", "Open / recent files", "F5", "Heading 1", "Ctrl-Shift-S", "Select all"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("help did not render %q:\n%s", want, text)
 		}
@@ -1885,7 +1909,7 @@ func TestStartMenuCanRenderStartupCoach(t *testing.T) {
 		rendered.WriteByte('\n')
 	}
 	text := rendered.String()
-	for _, want := range []string{"_____|  | ______", "<  <_> )", "New document", "Open path"} {
+	for _, want := range []string{"_____|  | ______", "<  <_> )", "New document", "Open / browse"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("startup coach/start menu did not render %q:\n%s", want, text)
 		}
@@ -1918,7 +1942,7 @@ func TestStartMenuRendersNewRecentAndOpenPath(t *testing.T) {
 		rendered.WriteByte('\n')
 	}
 	text := rendered.String()
-	for _, want := range []string{"_____|  | ______", "New document", "one.md", "Open path", "F1 help"} {
+	for _, want := range []string{"_____|  | ______", "New document", "one.md", "Open / browse", "F1 help"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("start menu did not render %q:\n%s", want, text)
 		}
@@ -1968,12 +1992,12 @@ func TestStartMenuGroupsRecentFilesByAge(t *testing.T) {
 		rendered.WriteByte('\n')
 	}
 	text := rendered.String()
-	for _, want := range []string{"[R] Recent files", "Past 48 hours", "fresh.md", "Past week", "week.md", "Older", "old.md", "Older than 2 weeks", "ancient.md"} {
+	for _, want := range []string{"[O] Open / browse", "Past 48 hours", "fresh.md", "Past week", "week.md", "Older", "old.md", "Older than 2 weeks", "ancient.md"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("start menu grouped recents missing %q:\n%s", want, text)
 		}
 	}
-	if strings.Index(text, "[R] Recent files") > strings.Index(text, "Past 48 hours") ||
+	if strings.Index(text, "[O] Open / browse") > strings.Index(text, "Past 48 hours") ||
 		strings.Index(text, "Past 48 hours") > strings.Index(text, "Past week") ||
 		strings.Index(text, "Past week") > strings.Index(text, "Older") ||
 		strings.Index(text, "Older") > strings.Index(text, "Older than 2 weeks") {
@@ -2021,11 +2045,11 @@ func TestStartMenuKeyActions(t *testing.T) {
 	e := &editor{lines: []string{""}, theme: themeByName("calm"), showStartMenu: true, recent: []string{"/tmp/one.md"}}
 
 	e.key(tcell.NewEventKey(tcell.KeyRune, 'o', 0))
-	if e.prompt != "Open path: " {
-		t.Fatalf("open path prompt = %q, want Open path: ", e.prompt)
+	if e.picker == nil || e.picker.mode != pickerOpen {
+		t.Fatal("start menu 'o' did not open the file picker")
 	}
 	if e.showStartMenu {
-		t.Fatal("start menu stayed visible after Open path")
+		t.Fatal("start menu stayed visible after Open")
 	}
 
 	e = &editor{lines: []string{""}, theme: themeByName("calm"), showStartMenu: true}
@@ -2056,8 +2080,8 @@ func TestStartMenuArrowSelectionAndEnter(t *testing.T) {
 		t.Fatalf("startMenuIndex after down = %d, want 1", e.startMenuIndex)
 	}
 	e.key(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
-	if e.prompt != "Open path: " {
-		t.Fatalf("selected Open path prompt = %q, want Open path: ", e.prompt)
+	if e.picker == nil || e.picker.mode != pickerOpen {
+		t.Fatal("selected Open item did not open the file picker")
 	}
 }
 
@@ -2119,8 +2143,9 @@ func TestOpenPathBareZoxideDirectoryCreatesUntitledInDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)
-	e := &editor{lines: []string{""}, prompt: "Open path: ", promptValue: "z briefs", untitled: true}
-	e.promptKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	e := &editor{lines: []string{""}, untitled: true}
+	e.picker = &picker{mode: pickerOpen, dir: t.TempDir(), input: "z briefs"}
+	e.pickerKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
 	want := filepath.Join(target, "untitled.md")
 	if e.path != want {
 		t.Fatalf("path = %q, want %q", e.path, want)
@@ -2130,7 +2155,7 @@ func TestOpenPathBareZoxideDirectoryCreatesUntitledInDirectory(t *testing.T) {
 	}
 }
 
-func TestSavePromptTabCompletesZoxideDirectory(t *testing.T) {
+func TestSavePickerTabDescendsIntoZoxideDirectory(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "zoxide")
 	target := filepath.Join(dir, "target")
@@ -2142,31 +2167,29 @@ func TestSavePromptTabCompletesZoxideDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)
-	e := &editor{lines: []string{"hello"}, prompt: "Save as: ", promptValue: "z briefs", promptCursor: runeLen("z briefs")}
-	e.promptKey(tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone))
-	want := target + string(os.PathSeparator)
-	if e.promptValue != want {
-		t.Fatalf("promptValue = %q, want %q", e.promptValue, want)
+	e := &editor{lines: []string{"hello"}}
+	e.picker = &picker{mode: pickerSaveAs, dir: t.TempDir(), input: "z briefs", cursor: runeLen("z briefs"), index: -1}
+	e.pickerKey(tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone))
+	if e.picker.dir != target {
+		t.Fatalf("picker dir = %q, want %q", e.picker.dir, target)
 	}
-	if e.promptCursor != runeLen(want) {
-		t.Fatalf("promptCursor = %d, want %d", e.promptCursor, runeLen(want))
+	if e.picker.input != "" {
+		t.Fatalf("picker input after descend = %q, want empty", e.picker.input)
 	}
-	if !strings.Contains(e.status, "Completed zoxide") {
-		t.Fatalf("status = %q, want zoxide completion", e.status)
+	for _, r := range "note" {
+		e.pickerKey(tcell.NewEventKey(tcell.KeyRune, r, 0))
 	}
-	e.promptKey(tcell.NewEventKey(tcell.KeyRune, 'n', 0))
-	e.promptKey(tcell.NewEventKey(tcell.KeyRune, 'o', 0))
-	e.promptKey(tcell.NewEventKey(tcell.KeyRune, 't', 0))
-	e.promptKey(tcell.NewEventKey(tcell.KeyRune, 'e', 0))
-	e.promptKey(tcell.NewEventKey(tcell.KeyLeft, 0, tcell.ModNone))
-	e.promptKey(tcell.NewEventKey(tcell.KeyRune, 'X', 0))
-	want = target + string(os.PathSeparator) + "notXe"
-	if e.promptValue != want {
-		t.Fatalf("edited promptValue = %q, want %q", e.promptValue, want)
+	e.pickerKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	want := filepath.Join(target, "note.md")
+	if e.path != want {
+		t.Fatalf("path = %q, want %q", e.path, want)
+	}
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("saved file missing: %v", err)
 	}
 }
 
-func TestOpenPromptTabCompletesZoxideWithFilename(t *testing.T) {
+func TestOpenPickerTabCompletesZoxideWithFilename(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "zoxide")
 	target := filepath.Join(dir, "target")
@@ -2178,14 +2201,15 @@ func TestOpenPromptTabCompletesZoxideWithFilename(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)
-	e := &editor{lines: []string{""}, prompt: "Open path: ", promptValue: "z briefs/draft", promptCursor: runeLen("z briefs/draft")}
-	e.promptKey(tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone))
+	e := &editor{lines: []string{""}}
+	e.picker = &picker{mode: pickerOpen, dir: t.TempDir(), input: "z briefs/draft", cursor: runeLen("z briefs/draft")}
+	e.pickerKey(tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone))
 	want := filepath.Join(target, "draft.md")
-	if e.promptValue != want {
-		t.Fatalf("promptValue = %q, want %q", e.promptValue, want)
+	if e.picker.input != want {
+		t.Fatalf("picker input = %q, want %q", e.picker.input, want)
 	}
-	if e.promptCursor != runeLen(want) {
-		t.Fatalf("promptCursor = %d, want %d", e.promptCursor, runeLen(want))
+	if e.picker.cursor != runeLen(want) {
+		t.Fatalf("picker cursor = %d, want %d", e.picker.cursor, runeLen(want))
 	}
 }
 
@@ -2222,8 +2246,9 @@ func TestSavePromptZoxideQueryWithSpaceFilename(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeMultiWordZoxideStub(t, dir, target)
-	e := &editor{lines: []string{"hello"}, prompt: "Save as: ", promptValue: "z little marco notes", untitled: true}
-	e.promptKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	e := &editor{lines: []string{"hello"}, untitled: true}
+	e.picker = &picker{mode: pickerSaveAs, dir: t.TempDir(), input: "z little marco notes", index: -1}
+	e.pickerKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
 	want := filepath.Join(target, "notes.md")
 	if e.path != want {
 		t.Fatalf("path = %q, want %q", e.path, want)
@@ -2240,8 +2265,9 @@ func TestOpenPromptZoxideQueryWithSpaceFilename(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeMultiWordZoxideStub(t, dir, target)
-	e := &editor{lines: []string{""}, prompt: "Open path: ", promptValue: "z little marco draft", untitled: true}
-	e.promptKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	e := &editor{lines: []string{""}, untitled: true}
+	e.picker = &picker{mode: pickerOpen, dir: t.TempDir(), input: "z little marco draft"}
+	e.pickerKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
 	want := filepath.Join(target, "draft.md")
 	if e.path != want {
 		t.Fatalf("path = %q, want %q", e.path, want)
@@ -2258,16 +2284,18 @@ func TestTabCompletesZoxideMultiWordWithFilename(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeMultiWordZoxideStub(t, dir, target)
-	e := &editor{lines: []string{"hello"}, prompt: "Save as: ", promptValue: "z little marco notes", promptCursor: runeLen("z little marco notes")}
-	e.promptKey(tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone))
+	e := &editor{lines: []string{"hello"}}
+	e.picker = &picker{mode: pickerSaveAs, dir: t.TempDir(), input: "z little marco notes", cursor: runeLen("z little marco notes"), index: -1}
+	e.pickerKey(tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone))
 	want := filepath.Join(target, "notes.md")
-	if e.promptValue != want {
-		t.Fatalf("promptValue = %q, want %q", e.promptValue, want)
+	if e.picker.input != want {
+		t.Fatalf("picker input = %q, want %q", e.picker.input, want)
 	}
-	e = &editor{lines: []string{"hello"}, prompt: "Save as: ", promptValue: "z little marco", promptCursor: runeLen("z little marco")}
-	e.promptKey(tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone))
-	if want := target + string(os.PathSeparator); e.promptValue != want {
-		t.Fatalf("bare promptValue = %q, want %q", e.promptValue, want)
+	e = &editor{lines: []string{"hello"}}
+	e.picker = &picker{mode: pickerSaveAs, dir: t.TempDir(), input: "z little marco", cursor: runeLen("z little marco"), index: -1}
+	e.pickerKey(tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone))
+	if e.picker.dir != target || e.picker.input != "" {
+		t.Fatalf("bare zoxide Tab: dir = %q input = %q, want dir %q and empty input", e.picker.dir, e.picker.input, target)
 	}
 }
 
@@ -2306,7 +2334,7 @@ func TestStartMenuCanShowHelpOverlay(t *testing.T) {
 	}
 }
 
-func TestRecentPanelUsesBracketedEmptyStateAndSplitFooter(t *testing.T) {
+func TestFilePickerShowsEmptyStateAndFooter(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	t.Setenv("HOME", dir)
@@ -2317,11 +2345,12 @@ func TestRecentPanelUsesBracketedEmptyStateAndSplitFooter(t *testing.T) {
 	defer screen.Fini()
 	screen.SetSize(80, 16)
 	e := &editor{
-		screen:     screen,
-		lines:      []string{"x"},
-		theme:      themeByName("calm"),
-		showRecent: true,
+		screen: screen,
+		lines:  []string{"x"},
+		theme:  themeByName("calm"),
 	}
+	e.picker = &picker{mode: pickerOpen, dir: t.TempDir()}
+	e.refreshPicker()
 	e.draw()
 	var rendered strings.Builder
 	for row := 0; row < 16; row++ {
@@ -2329,15 +2358,18 @@ func TestRecentPanelUsesBracketedEmptyStateAndSplitFooter(t *testing.T) {
 		rendered.WriteByte('\n')
 	}
 	text := rendered.String()
-	if !strings.Contains(text, "<No recent files>") {
-		t.Fatalf("recent panel empty state missing:\n%s", text)
+	if !strings.Contains(text, "<empty folder>") {
+		t.Fatalf("picker empty state missing:\n%s", text)
 	}
-	if !strings.Contains(text, "Up/Down select   Enter open") || !strings.Contains(text, "Esc cancel") {
-		t.Fatalf("recent panel footer not split across lines:\n%s", text)
+	if !strings.Contains(text, "Enter open") || !strings.Contains(text, "Esc cancel") {
+		t.Fatalf("picker footer hints missing:\n%s", text)
+	}
+	if !strings.Contains(text, "Open —") {
+		t.Fatalf("picker title missing:\n%s", text)
 	}
 }
 
-func TestRecentPanelRefreshesFromDisk(t *testing.T) {
+func TestFilePickerRefreshesRecentsFromDisk(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	t.Setenv("HOME", dir)
@@ -2358,12 +2390,12 @@ func TestRecentPanelRefreshesFromDisk(t *testing.T) {
 	defer screen.Fini()
 	screen.SetSize(80, 16)
 	e := &editor{
-		screen:     screen,
-		lines:      []string{"x"},
-		theme:      themeByName("calm"),
-		showRecent: true,
-		recent:     nil,
+		screen: screen,
+		lines:  []string{"x"},
+		theme:  themeByName("calm"),
 	}
+	e.picker = &picker{mode: pickerOpen, dir: t.TempDir()}
+	e.refreshPicker()
 	e.draw()
 	var rendered strings.Builder
 	for row := 0; row < 16; row++ {
@@ -2371,15 +2403,19 @@ func TestRecentPanelRefreshesFromDisk(t *testing.T) {
 		rendered.WriteByte('\n')
 	}
 	text := rendered.String()
-	if !strings.Contains(text, "note.md [") {
-		t.Fatalf("recent panel did not refresh from disk:\n%s", rendered.String())
+	if !strings.Contains(text, "note.md") {
+		t.Fatalf("picker did not list recent file from disk:\n%s", text)
+	}
+	if !strings.Contains(text, "Recent") {
+		t.Fatalf("picker missing Recent header:\n%s", text)
 	}
 }
 
-func TestRecentPanelGroupsByAge(t *testing.T) {
+func TestFilePickerListsFolderNewestFirst(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", config)
+	t.Setenv("HOME", config)
 	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
-	t.Setenv("HOME", dir)
 	now := time.Now()
 	fresh := filepath.Join(dir, "fresh.md")
 	week := filepath.Join(dir, "week.md")
@@ -2399,12 +2435,6 @@ func TestRecentPanelGroupsByAge(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.MkdirAll(filepath.Dir(recentConfigPath()), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(recentConfigPath(), []byte(strings.Join([]string{fresh, week, old}, "\n")), 0644); err != nil {
-		t.Fatal(err)
-	}
 	screen := tcell.NewSimulationScreen("UTF-8")
 	if err := screen.Init(); err != nil {
 		t.Fatal(err)
@@ -2412,11 +2442,12 @@ func TestRecentPanelGroupsByAge(t *testing.T) {
 	defer screen.Fini()
 	screen.SetSize(110, 20)
 	e := &editor{
-		screen:     screen,
-		lines:      []string{"x"},
-		theme:      themeByName("calm"),
-		showRecent: true,
+		screen: screen,
+		lines:  []string{"x"},
+		theme:  themeByName("calm"),
 	}
+	e.picker = &picker{mode: pickerOpen, dir: dir}
+	e.refreshPicker()
 	e.draw()
 	var rendered strings.Builder
 	for row := 0; row < 20; row++ {
@@ -2424,13 +2455,137 @@ func TestRecentPanelGroupsByAge(t *testing.T) {
 		rendered.WriteByte('\n')
 	}
 	text := rendered.String()
-	for _, want := range []string{"Past 48 hours", "Past week", "Older", "fresh.md", "week.md", "old.md"} {
+	for _, want := range []string{"This folder", "fresh.md", "week.md", "old.md"} {
 		if !strings.Contains(text, want) {
-			t.Fatalf("grouped recent panel missing %q:\n%s", want, text)
+			t.Fatalf("picker folder listing missing %q:\n%s", want, text)
 		}
 	}
-	if strings.Index(text, "Past 48 hours") > strings.Index(text, "Past week") || strings.Index(text, "Past week") > strings.Index(text, "Older") {
-		t.Fatalf("recent groups out of order:\n%s", text)
+	if strings.Index(text, "fresh.md") > strings.Index(text, "week.md") || strings.Index(text, "week.md") > strings.Index(text, "old.md") {
+		t.Fatalf("picker folder entries not newest first:\n%s", text)
+	}
+}
+
+func TestFilePickerFuzzyFilter(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", config)
+	t.Setenv("HOME", config)
+	dir := t.TempDir()
+	for _, name := range []string{"meeting-notes.md", "shopping.md", "monthly-report.md"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e := &editor{lines: []string{"x"}, theme: themeByName("calm")}
+	e.picker = &picker{mode: pickerOpen, dir: dir}
+	e.refreshPicker()
+	for _, r := range "mtng" {
+		e.pickerKey(tcell.NewEventKey(tcell.KeyRune, r, 0))
+	}
+	visible := e.picker.visibleItems()
+	if len(visible) == 0 || visible[0].name != "meeting-notes.md" {
+		t.Fatalf("fuzzy filter top match = %#v, want meeting-notes.md first", visible)
+	}
+	for _, item := range visible {
+		if item.name == "shopping.md" {
+			t.Fatal("fuzzy filter kept non-matching shopping.md")
+		}
+	}
+	e.pickerKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	if e.picker != nil {
+		t.Fatal("picker stayed open after Enter on a file")
+	}
+	if filepath.Base(e.path) != "meeting-notes.md" {
+		t.Fatalf("opened %q, want meeting-notes.md", e.path)
+	}
+}
+
+func TestFilePickerBackspaceAscendsAndEnterDescends(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", config)
+	t.Setenv("HOME", config)
+	parent := t.TempDir()
+	child := filepath.Join(parent, "drafts")
+	if err := os.MkdirAll(child, 0755); err != nil {
+		t.Fatal(err)
+	}
+	e := &editor{lines: []string{"x"}, theme: themeByName("calm")}
+	e.picker = &picker{mode: pickerOpen, dir: child}
+	e.refreshPicker()
+	e.pickerKey(tcell.NewEventKey(tcell.KeyBackspace2, 0, tcell.ModNone))
+	if e.picker.dir != parent {
+		t.Fatalf("backspace dir = %q, want %q", e.picker.dir, parent)
+	}
+	// The only entry in parent is the drafts directory; Enter descends into it.
+	if items := e.picker.visibleItems(); len(items) == 0 || !items[0].dir {
+		t.Fatalf("parent listing missing drafts dir: %#v", items)
+	}
+	e.pickerKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	if e.picker == nil || e.picker.dir != child {
+		t.Fatalf("enter did not descend into drafts")
+	}
+}
+
+func TestRenamePickerAnchorsToFileDirectory(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", config)
+	t.Setenv("HOME", config)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "old-name.md")
+	if err := os.WriteFile(path, []byte("body"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	e := &editor{lines: []string{"body"}, path: path}
+	e.key(tcell.NewEventKey(tcell.KeyCtrlR, 0, tcell.ModCtrl|tcell.ModShift))
+	if e.picker == nil || e.picker.mode != pickerRename {
+		t.Fatal("Ctrl-Shift-R did not open the rename picker")
+	}
+	if e.picker.dir != dir {
+		t.Fatalf("rename picker dir = %q, want file's own dir %q", e.picker.dir, dir)
+	}
+	if e.picker.input != "old-name.md" {
+		t.Fatalf("rename picker input = %q, want old-name.md", e.picker.input)
+	}
+	e.pickerKey(tcell.NewEventKey(tcell.KeyRune, 'n', 0)) // selectAll replaces
+	for _, r := range "ew-name" {
+		e.pickerKey(tcell.NewEventKey(tcell.KeyRune, r, 0))
+	}
+	e.pickerKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	want := filepath.Join(dir, "new-name.md")
+	if e.path != want {
+		t.Fatalf("renamed path = %q, want %q", e.path, want)
+	}
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("renamed file missing: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("old file still present: %v", err)
+	}
+}
+
+func TestRenamePickerRefusesExistingTarget(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", config)
+	t.Setenv("HOME", config)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.md")
+	other := filepath.Join(dir, "b.md")
+	for _, p := range []string{path, other} {
+		if err := os.WriteFile(p, []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e := &editor{lines: []string{"x"}, path: path}
+	e.openRenamePicker()
+	e.picker.input, e.picker.cursor, e.picker.selectAll = "b", 1, false
+	e.pickerKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	if e.picker == nil {
+		t.Fatal("rename picker closed despite collision")
+	}
+	if e.picker.err == "" {
+		t.Fatal("rename collision produced no error message")
+	}
+	if e.path != path {
+		t.Fatalf("path changed on refused rename: %q", e.path)
 	}
 }
 
@@ -2459,10 +2614,9 @@ func TestRecentPanelShowsRecencyGradient(t *testing.T) {
 	defer screen.Fini()
 	screen.SetSize(100, 18)
 	e := &editor{
-		screen:     screen,
-		lines:      []string{"x"},
-		theme:      themeByName("calm"),
-		showRecent: true,
+		screen: screen,
+		lines:  []string{"x"},
+		theme:  themeByName("calm"),
 	}
 	newColor := recentGradientColor(0, 2)
 	oldColor := recentGradientColor(1, 2)
@@ -2542,42 +2696,57 @@ func TestWrappedLineEmphasisRenders(t *testing.T) {
 	}
 }
 
-func TestUntitledSavePrompts(t *testing.T) {
+func TestUntitledSaveOpensPicker(t *testing.T) {
 	e := &editor{lines: []string{"x"}, path: "20260618_untitled.md", untitled: true}
 	e.key(tcell.NewEventKey(tcell.KeyCtrlS, 0, tcell.ModCtrl))
-	if e.prompt != "Save as: " {
-		t.Fatalf("untitled Ctrl-S prompt = %q, want %q", e.prompt, "Save as: ")
+	if e.picker == nil || e.picker.mode != pickerSaveAs {
+		t.Fatal("untitled Ctrl-S did not open the Save As picker")
 	}
-	if e.promptValue != "untitled.md" {
-		t.Fatalf("untitled Ctrl-S promptValue = %q, want untitled.md", e.promptValue)
+	if e.picker.input != "untitled.md" {
+		t.Fatalf("untitled Ctrl-S picker input = %q, want untitled.md", e.picker.input)
 	}
-	if !e.promptSelectAll {
+	if !e.picker.selectAll {
 		t.Fatal("untitled Ctrl-S did not select the dummy filename")
 	}
 	e.key(tcell.NewEventKey(tcell.KeyRune, 'z', 0))
-	if e.promptValue != "z" || e.promptCursor != 1 || e.promptSelectAll {
-		t.Fatalf("typing did not replace selected dummy: value=%q cursor=%d selected=%v", e.promptValue, e.promptCursor, e.promptSelectAll)
+	if e.picker.input != "z" || e.picker.cursor != 1 || e.picker.selectAll {
+		t.Fatalf("typing did not replace selected dummy: value=%q cursor=%d selected=%v", e.picker.input, e.picker.cursor, e.picker.selectAll)
 	}
 }
 
-func TestSavePromptShowsZoxideHint(t *testing.T) {
+func TestSavePickerShowsDirectoryListingAndOverwriteWarning(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", config)
+	t.Setenv("HOME", config)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "existing.md"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	screen := tcell.NewSimulationScreen("UTF-8")
 	if err := screen.Init(); err != nil {
 		t.Fatal(err)
 	}
 	defer screen.Fini()
-	screen.SetSize(80, 3)
+	screen.SetSize(90, 18)
 	e := &editor{
-		screen:      screen,
-		lines:       []string{"x"},
-		prompt:      "Save as: ",
-		promptValue: "untitled.md",
-		theme:       themeByName("calm"),
+		screen: screen,
+		lines:  []string{"x"},
+		theme:  themeByName("calm"),
 	}
+	e.picker = &picker{mode: pickerSaveAs, dir: dir, input: "existing", index: -1}
+	e.refreshPicker()
 	e.draw()
-	got := simulationLine(screen, 2, 80)
-	if !strings.Contains(got, "[z folder filename, or z folder + Tab]") {
-		t.Fatalf("save prompt hint missing: %q", got)
+	var rendered strings.Builder
+	for row := 0; row < 18; row++ {
+		rendered.WriteString(simulationLine(screen, row, 90))
+		rendered.WriteByte('\n')
+	}
+	text := rendered.String()
+	if !strings.Contains(text, "existing.md") {
+		t.Fatalf("save picker did not list target directory:\n%s", text)
+	}
+	if !strings.Contains(text, "overwrites existing.md") {
+		t.Fatalf("save picker missing overwrite warning:\n%s", text)
 	}
 }
 
@@ -2604,25 +2773,21 @@ func TestPromptRendersInFocusMode(t *testing.T) {
 	}
 }
 
-func TestCtrlSSubmitsSavePrompt(t *testing.T) {
+func TestEnterSubmitsSavePickerThroughKeyRouting(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "note.md")
-	e := &editor{
-		lines:        []string{"hello"},
-		prompt:       "Save as: ",
-		promptValue:  path,
-		promptCursor: runeLen(path),
-	}
-	e.key(tcell.NewEventKey(tcell.KeyCtrlS, 0, tcell.ModCtrl))
-	if e.prompt != "" {
-		t.Fatalf("Ctrl-S left prompt open: %q", e.prompt)
+	e := &editor{lines: []string{"hello"}}
+	e.picker = &picker{mode: pickerSaveAs, dir: dir, input: "note", cursor: 4, index: -1}
+	e.key(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	if e.picker != nil {
+		t.Fatal("Enter left save picker open")
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got, want := string(data), "hello"; got != want {
-		t.Fatalf("Ctrl-S save wrote %q, want %q", got, want)
+		t.Fatalf("save wrote %q, want %q", got, want)
 	}
 }
 
@@ -2666,10 +2831,17 @@ func TestCtrlShiftSShowsSaveAsPromptInFocusMode(t *testing.T) {
 		focusMode: true,
 	}
 	e.key(tcell.NewEventKey(tcell.KeyCtrlS, 0, tcell.ModCtrl|tcell.ModShift))
+	if e.picker == nil || e.picker.mode != pickerSaveAs {
+		t.Fatal("focus-mode Ctrl-Shift-S did not open the Save As picker")
+	}
 	e.draw()
-	got := simulationLine(screen, 3, 80)
-	if !strings.Contains(got, "Save as: note.md") {
-		t.Fatalf("focus-mode Ctrl-Shift-S did not show Save As prompt: %q", got)
+	var rendered strings.Builder
+	for row := 0; row < 4; row++ {
+		rendered.WriteString(simulationLine(screen, row, 80))
+		rendered.WriteByte('\n')
+	}
+	if !strings.Contains(rendered.String(), "Save as") {
+		t.Fatalf("focus-mode Ctrl-Shift-S did not draw the Save As picker:\n%s", rendered.String())
 	}
 }
 

@@ -36,17 +36,20 @@ Documents autosave after two idle seconds. Press `F1` inside Marko for the compl
 ## Features We Are Proud Of
 
 ### 💡 Dynamic Inline Markdown Rendering
-- **Aligned Tables**: Markdown tables instantly format into clean, boxed unicode tables. Pressing `Tab` moves through cells, `Enter` inserts new rows, and stepping out preserves the formatting.
+- **Aligned Tables**: Markdown tables instantly format into clean, boxed unicode tables. `Ctrl-T` opens a Word-style grid picker to insert a table of any size; pressing `Tab` moves through cells, `Enter` inserts new rows, and stepping out preserves the formatting. Inside a table, `Alt`-arrows add or delete rows and columns, and `Ctrl-T` cycles the current column's alignment (`:---` / `:---:` / `---:`) — the alignment is respected in both the raw source and the rendered view.
 - **Fenced Code Blocks**: Raw code blocks fold into visually distinct boxes with calm language labels. Stepping inside reveals the code, and stepping out hides the syntax.
 - **Emphasis & Headers**: Headers are styled and clean, and bold, italic, underline, highlight, or strikethrough markdown markers disappear inline unless you are actively editing that line. Toggle inline formatting WYSIWYG-style with `Ctrl-B` (bold), `Ctrl-E` (italic), `Ctrl-U` (underline), and `Ctrl-H` (highlight); use `F5`, `F6`, and `F7` to toggle H1, H2, and H3 on the current line. H1 and H2 also get extra vertical breathing room to fake scale inside the terminal.
 - **Interactive Checkboxes**: Toggle lists and markdown checkboxes `[ ]` / `[x]` instantly using `Ctrl-Space`.
 
 ### 🎯 Intelligent Focus Mode
-Focus mode (toggled persistently using `Ctrl-K`) doesn't just dim lines blindly. It parses Markdown structure and uses each theme's own focus and dim backgrounds:
+Focus mode (toggled persistently using `Ctrl-K`) doesn't just dim lines blindly. It parses Markdown structure and recedes everything else Limelight-style:
 - If you're on a paragraph, it highlights the paragraph and dims everything else.
 - If you enter a table, the entire table remains beautifully lit.
 - If you write code, the entire code block stays visible.
 - It respects headers, list structures, and blockquotes, keeping your immediate workspace clear and isolated.
+- **True dimming**: surrounding text is blended toward the page colour rather than repainted flat grey, so headings and accents keep their hue while receding. The lines immediately around your paragraph get a half-strength dim for a soft edge.
+- **Typewriter scrolling**: in focus mode the cursor line stays vertically centred, so your eyes never chase the cursor down the screen.
+- **Focus scope**: `Ctrl-Shift-K` cycles between paragraph focus and section focus (everything under the current heading stays lit — lovely for editing).
 
 ### 🔄 Asynchronous External Syncing
 Marko works perfectly alongside external automations, scripts, or AI assistants. The editor watches the underlying file on a 500ms heartbeat. If an AI writes an update to the file in the background, Marko instantly reloads the buffer and redraws your screen, keeping your cursor and scroll viewport exactly where you left them.
@@ -65,14 +68,18 @@ Marko works perfectly alongside external automations, scripts, or AI assistants.
 | `Ctrl-H` | Highlight (`==…==`, theme-colored) — wrap/unwrap selection, or insert empty markers |
 | `F5` / `F6` / `F7` | Toggle H1 / H2 / H3 on the current line |
 | `Ctrl-A` | Select all |
-| `F3` / `Ctrl-Shift-E` | Open recent Markdown file |
+| `F3` / `Ctrl-Shift-E` | Open the file picker (recents + browse, fuzzy filter) |
+| `Ctrl-Shift-R` | Rename the current file (stays in its own folder) |
 | `Ctrl-F` / `Ctrl-N` / `Ctrl-P` | Search / next / previous |
 | `Ctrl-R` | Replace current; `Ctrl-A` in prompt replaces all |
 | `Ctrl-Z` / `Ctrl-Y` | Undo / redo |
 | `Ctrl-C` / `Ctrl-X` / `Ctrl-V` | Copy / cut / paste |
-| `Ctrl-T` | Create table |
+| `Ctrl-T` | Insert table (grid size picker); inside a table, cycle the current column's alignment |
+| `Alt-Down` / `Alt-Up` | Inside a table: add / delete a row |
+| `Alt-Right` / `Alt-Left` | Inside a table: add / delete a column |
 | `Ctrl-G` | Cycle theme |
 | `Ctrl-K` | Toggle focus mode (Goyo-style) |
+| `Ctrl-Shift-K` | Cycle focus scope: paragraph / section |
 | `Ctrl-Q` | Quit |
 
 > Italic is on `Ctrl-E` rather than `Ctrl-I` because in terminals `Ctrl-I` is
@@ -116,13 +123,15 @@ MARKO_THEME=light marko document.md
 
 Press `Ctrl-G` to cycle and remember themes. `matrix` is the phosphor terminal-focus palette; `midnight` is a quiet dark writing palette; `paper` is warm and bright; `ember` is a warmer evening dark theme. Marko inherits your terminal font; for a warmer writing feel, try Berkeley Mono, iA Writer Mono, or Atkinson Hyperlegible Mono in your terminal settings.
 
-## Home Screen And Paths
+## File Picker, Home Screen And Paths
 
-Press `F4` to open the Marko home screen from any document. Use Up/Down and Enter to choose New document, Open path, Recent files, Theme, Return to document, or Quit. `Esc` returns to the current document.
+`F3` (or `Ctrl-Shift-E`) opens the file picker: your recent files (up to 50) followed by the Markdown files and folders of the current directory, newest first. Type to fuzzy-filter (`mtng` matches `meeting-notes.md`), `Enter` opens the highlighted file or steps into a folder, `Tab` steps into a highlighted folder, and `Backspace` on an empty filter goes up one level. Typing a name that matches nothing and pressing `Enter` creates that file — the picker doubles as "new named note here".
 
-Recent files are grouped by age on the home screen and in the recent picker: past 48 hours, past week, older, and older than 2 weeks.
+Save As (`F2`) and Rename (`Ctrl-Shift-R`) use the same panel: the filename is pre-selected for instant retyping, the target folder's contents are listed below so you can see collisions (with an explicit "overwrites…" warning), and you can browse into a different folder before committing. Rename is anchored to the file's own directory, so renaming never silently moves the file to wherever you launched Marko from.
 
-Open and Save As prompts prioritize zoxide shortcuts, then fall back to ordinary paths. For an untitled note, Save As starts with `untitled.md` selected, so typing immediately replaces it. Type a zoxide query — multi-word queries work, each word is a zoxide keyword — followed by a filename, all in one go:
+Press `F4` to open the Marko home screen from any document. Use Up/Down and Enter to choose New document, Open / browse, a recent file, Theme, Return to document, or Quit. `Esc` returns to the current document. Recent files are grouped by age on the home screen: past 48 hours, past week, older, and older than 2 weeks.
+
+The picker input also understands zoxide shortcuts and ordinary paths. For an untitled note, Save As starts with `untitled.md` selected, so typing immediately replaces it. Type a zoxide query — multi-word queries work, each word is a zoxide keyword — followed by a filename, all in one go:
 
 ```text
 z little marco draft
