@@ -127,7 +127,7 @@ Press `Ctrl-G` to cycle and remember themes. `matrix` is the phosphor terminal-f
 
 ## File Picker, Home Screen And Paths
 
-`F3` (or `Ctrl-Shift-E`) opens the file picker: your recent files (up to 50) followed by the Markdown files and folders of the current directory, newest first. Type to fuzzy-filter (`mtng` matches `meeting-notes.md`), `Enter` opens the highlighted file or steps into a folder, `Tab` steps into a highlighted folder, and `Backspace` on an empty filter goes up one level. Typing a name that matches nothing and pressing `Enter` creates that file — the picker doubles as "new named note here".
+`F3` (or `Ctrl-Shift-E`) opens the file picker: your recent files (up to 50) followed by a `..` parent row and the Markdown files and folders of the current directory, newest first. Going up with `Backspace` (or `Enter` on `..`) highlights the folder you just left, so `Enter` steps straight back in. Type to fuzzy-filter (`mtng` matches `meeting-notes.md`), `Enter` opens the highlighted file or steps into a folder, `Tab` steps into a highlighted folder, and `Backspace` on an empty filter goes up one level. Typing a name that matches nothing and pressing `Enter` creates that file — the picker doubles as "new named note here".
 
 Save As (`F2`) and Rename (`Ctrl-Shift-R`) use the same panel: the filename is pre-selected for instant retyping, the target folder's contents are listed below so you can see collisions (with an explicit "overwrites…" warning), and you can browse into a different folder before committing. Rename is anchored to the file's own directory, so renaming never silently moves the file to wherever you launched Marko from.
 

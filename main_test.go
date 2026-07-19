@@ -2585,8 +2585,9 @@ func TestFilePickerShowsEmptyStateAndFooter(t *testing.T) {
 		rendered.WriteByte('\n')
 	}
 	text := rendered.String()
-	if !strings.Contains(text, "<empty folder>") {
-		t.Fatalf("picker empty state missing:\n%s", text)
+	// An empty folder still offers the ".." parent row for navigation.
+	if !strings.Contains(text, "../") {
+		t.Fatalf("picker parent row missing:\n%s", text)
 	}
 	if !strings.Contains(text, "Enter open") || !strings.Contains(text, "Esc cancel") {
 		t.Fatalf("picker footer hints missing:\n%s", text)

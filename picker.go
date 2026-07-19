@@ -256,7 +256,7 @@ func (e *editor) refreshPicker() {
 			p.items = append(p.items, pickerItem{name: filepath.Base(dir), path: dir, dir: true, recent: true})
 		}
 	}
-	if parent := filepath.Dir(p.dir); p.mode != pickerOpen && parent != p.dir {
+	if parent := filepath.Dir(p.dir); parent != p.dir {
 		p.items = append(p.items, pickerItem{name: "..", path: parent, dir: true})
 	}
 	p.items = append(p.items, listPickerTree(p.dir, 0, p.expanded)...)
@@ -560,6 +560,7 @@ func (e *editor) pickerAscend() {
 	if p.mode == pickerNotes {
 		return // flat search over the notes tree; nothing to ascend to
 	}
+	from := p.dir
 	parent := filepath.Dir(p.dir)
 	if parent == p.dir {
 		return
@@ -570,6 +571,14 @@ func (e *editor) pickerAscend() {
 		p.index = -1
 	}
 	e.refreshPicker()
+	// Highlight the folder we just came out of, so Enter steps back in
+	// rather than landing on ".." or an arbitrary first row.
+	for i, item := range p.visibleItems() {
+		if item.dir && !item.recent && item.name != ".." && item.path == from {
+			p.index = i
+			break
+		}
+	}
 }
 
 func (e *editor) pickerDescend(dir string) {
