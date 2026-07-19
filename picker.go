@@ -21,6 +21,7 @@ const (
 	pickerOpen pickerMode = iota
 	pickerSaveAs
 	pickerRename
+	pickerNotes // search the notes directory by name and content
 )
 
 type pickerItem struct {
@@ -29,6 +30,15 @@ type pickerItem struct {
 	dir     bool
 	recent  bool
 	modTime time.Time
+	content string // original file text (notes search only)
+	lowered string // lowercased content for case-insensitive matching
+	snippet string // matching line shown next to the name
+}
+
+// listFirst reports whether the highlighted list row, not the input, is the
+// primary target — true for the open and notes-search pickers.
+func (p *picker) listFirst() bool {
+	return p.mode == pickerOpen || p.mode == pickerNotes
 }
 
 type picker struct {
@@ -48,6 +58,133 @@ func (e *editor) openFilePicker() {
 	dir := e.pickerStartDir()
 	e.picker = &picker{mode: pickerOpen, dir: dir, index: 0}
 	e.refreshPicker()
+}
+
+const (
+	maxNotesIndexFiles = 2000
+	maxNotesFileBytes  = 128 * 1024
+)
+
+// openNotesSearch searches every note in the notes directory by filename and
+// content — the "which file was that client call in?" picker.
+func (e *editor) openNotesSearch() {
+	dir := notesDir()
+	e.picker = &picker{mode: pickerNotes, dir: dir, index: 0, items: loadNotesIndex(dir)}
+	e.flashStatus()
+}
+
+func loadNotesIndex(dir string) []pickerItem {
+	var items []pickerItem
+	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if strings.HasPrefix(d.Name(), ".") {
+			if d.IsDir() && path != dir {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !pickerFileExtensions[strings.ToLower(filepath.Ext(d.Name()))] {
+			return nil
+		}
+		if len(items) >= maxNotesIndexFiles {
+			return filepath.SkipAll
+		}
+		item := pickerItem{name: d.Name(), path: path}
+		if rel, err := filepath.Rel(dir, path); err == nil {
+			item.name = rel
+		}
+		if info, err := d.Info(); err == nil {
+			item.modTime = info.ModTime()
+			if info.Size() <= maxNotesFileBytes {
+				if data, err := os.ReadFile(path); err == nil {
+					item.content = string(data)
+					item.lowered = strings.ToLower(item.content)
+				}
+			}
+		}
+		items = append(items, item)
+		return nil
+	})
+	sort.Slice(items, func(i, j int) bool {
+		if !items[i].modTime.Equal(items[j].modTime) {
+			return items[i].modTime.After(items[j].modTime)
+		}
+		return items[i].name < items[j].name
+	})
+	return items
+}
+
+// visibleNotes filters the notes index: every space-separated term must
+// appear in the filename or the content, filename hits ranking higher.
+func (p *picker) visibleNotes() []pickerItem {
+	terms := strings.Fields(strings.ToLower(p.input))
+	if len(terms) == 0 {
+		return p.items
+	}
+	type scored struct {
+		item  pickerItem
+		score int
+	}
+	var matches []scored
+	for _, item := range p.items {
+		nameLower := strings.ToLower(item.name)
+		score, ok, snippetTerm := 0, true, ""
+		for _, term := range terms {
+			inName := strings.Contains(nameLower, term)
+			inContent := strings.Contains(item.lowered, term)
+			if !inName && !inContent {
+				ok = false
+				break
+			}
+			if inName {
+				score += 8
+			}
+			if inContent {
+				score += 2
+				if snippetTerm == "" {
+					snippetTerm = term
+				}
+			}
+		}
+		if !ok {
+			continue
+		}
+		if s, matched := fuzzyScore(p.input, item.name); matched {
+			score += s
+		}
+		item.snippet = noteSnippet(item.content, item.lowered, snippetTerm)
+		matches = append(matches, scored{item, score})
+	}
+	sort.SliceStable(matches, func(i, j int) bool { return matches[i].score > matches[j].score })
+	out := make([]pickerItem, len(matches))
+	for i, m := range matches {
+		out[i] = m.item
+	}
+	return out
+}
+
+// noteSnippet returns the original-case line holding the first match of term.
+// Line lookup goes via the lowered copy so Unicode case folding that changes
+// byte offsets cannot point the snippet at the wrong text.
+func noteSnippet(original, lowered, term string) string {
+	if term == "" {
+		return ""
+	}
+	idx := strings.Index(lowered, term)
+	if idx < 0 {
+		return ""
+	}
+	lineIdx := strings.Count(lowered[:idx], "\n")
+	lines := strings.SplitN(original, "\n", lineIdx+2)
+	if lineIdx < len(lines) {
+		return strings.Join(strings.Fields(lines[lineIdx]), " ")
+	}
+	return ""
 }
 
 func (e *editor) openSaveAsPicker() {
@@ -93,7 +230,7 @@ func absDir(dir string) string {
 
 func (e *editor) refreshPicker() {
 	p := e.picker
-	if p == nil {
+	if p == nil || p.mode == pickerNotes {
 		return
 	}
 	p.items = p.items[:0]
@@ -186,6 +323,9 @@ func (p *picker) matchText(item pickerItem) string {
 }
 
 func (p *picker) visibleItems() []pickerItem {
+	if p.mode == pickerNotes {
+		return p.visibleNotes()
+	}
 	if strings.TrimSpace(p.input) == "" || strings.HasPrefix(p.input, "z ") {
 		return p.items
 	}
@@ -209,7 +349,7 @@ func (p *picker) visibleItems() []pickerItem {
 
 func (p *picker) clampIndex(visible int) {
 	minIndex := 0
-	if p.mode != pickerOpen {
+	if !p.listFirst() {
 		minIndex = -1
 	}
 	if p.index < minIndex {
@@ -218,7 +358,7 @@ func (p *picker) clampIndex(visible int) {
 	if p.index >= visible {
 		p.index = visible - 1
 	}
-	if p.index < 0 && p.mode == pickerOpen {
+	if p.index < 0 && p.listFirst() {
 		p.index = 0
 	}
 }
@@ -310,7 +450,7 @@ func (e *editor) pickerKey(ev *tcell.EventKey) {
 func (e *editor) pickerInputChanged() {
 	p := e.picker
 	p.err = ""
-	if p.mode == pickerOpen {
+	if p.listFirst() {
 		p.index = 0
 	} else {
 		p.index = -1
@@ -319,6 +459,9 @@ func (e *editor) pickerInputChanged() {
 
 func (e *editor) pickerAscend() {
 	p := e.picker
+	if p.mode == pickerNotes {
+		return // flat search over the notes tree; nothing to ascend to
+	}
 	parent := filepath.Dir(p.dir)
 	if parent == p.dir {
 		return
@@ -378,7 +521,7 @@ func (e *editor) pickerSubmit() {
 			e.pickerDescend(item.path)
 			return
 		}
-		if p.mode == pickerOpen {
+		if p.listFirst() {
 			e.picker = nil
 			e.openFile(item.path)
 			return
@@ -396,7 +539,7 @@ func (e *editor) pickerSubmit() {
 		return
 	}
 	switch p.mode {
-	case pickerOpen:
+	case pickerOpen, pickerNotes:
 		expanded, err := expandPathInput(input)
 		if err != nil {
 			p.err = err.Error()
@@ -461,13 +604,18 @@ func (p *picker) title() string {
 		return "Save as"
 	case pickerRename:
 		return "Rename"
+	case pickerNotes:
+		return "Search notes"
 	}
 	return "Open"
 }
 
 func (p *picker) footerHint() string {
-	if p.mode == pickerOpen {
+	switch p.mode {
+	case pickerOpen:
 		return "Enter open · Tab into folder · Backspace up · z query Tab · Esc cancel"
+	case pickerNotes:
+		return "Type words to match names & content · Enter open · Esc cancel"
 	}
 	return "Enter save · Up/Down browse · Backspace up · Esc cancel"
 }
@@ -475,7 +623,7 @@ func (p *picker) footerHint() string {
 // pickerCollision reports a warning when committing the current input would
 // overwrite an existing file.
 func (p *picker) collision(renameFrom string) string {
-	if p.mode == pickerOpen {
+	if p.listFirst() {
 		return ""
 	}
 	input := strings.TrimSpace(p.input)
@@ -529,7 +677,9 @@ func (e *editor) pickerRows(visible []pickerItem, width int) []pickerRow {
 		if item.recent {
 			label = truncatePathMiddle(shortenHomePath(item.path), width-20)
 		}
-		if !item.dir && !item.modTime.IsZero() {
+		if item.snippet != "" {
+			label += "  · " + item.snippet
+		} else if !item.dir && !item.modTime.IsZero() {
 			label += "  · " + item.modTime.Format("2006-01-02 15:04")
 		}
 		if runeLen(label) > width {
@@ -609,7 +759,12 @@ func (e *editor) drawPicker(w, h int) {
 	}
 	if len(listRows) == 0 {
 		empty := "<empty folder>"
-		if p.mode == pickerOpen && strings.TrimSpace(p.input) != "" {
+		if p.mode == pickerNotes {
+			empty = "<no matching notes>"
+			if strings.TrimSpace(p.input) != "" {
+				empty = "<no matching notes — Enter creates \"" + strings.TrimSpace(p.input) + "\">"
+			}
+		} else if p.mode == pickerOpen && strings.TrimSpace(p.input) != "" {
 			empty = "<no matches — Enter creates \"" + strings.TrimSpace(p.input) + "\">"
 		}
 		e.put(x+2, listTop, empty, box, x+boxWidth-2)

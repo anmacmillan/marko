@@ -71,6 +71,8 @@ Marko works perfectly alongside external automations, scripts, or AI assistants.
 | `F3` / `Ctrl-Shift-E` | Open the file picker (recents + browse, fuzzy filter) |
 | `Ctrl-Shift-R` | Rename the current file (stays in its own folder) |
 | `Ctrl-F` / `Ctrl-N` / `Ctrl-P` | Search / next / previous |
+| `Ctrl-Shift-F` / `F8` | Search all notes — filenames **and** content, matching line shown |
+| `Ctrl-W` | Set a session word goal (progress in the status bar, flash on reach) |
 | `Ctrl-R` | Replace current; `Ctrl-A` in prompt replaces all |
 | `Ctrl-Z` / `Ctrl-Y` | Undo / redo |
 | `Ctrl-C` / `Ctrl-X` / `Ctrl-V` | Copy / cut / paste |
@@ -140,6 +142,14 @@ Launching `marko` with no file shows the same home screen over a fresh note — 
 ### Smart save names
 
 Save As for an untitled note pre-fills a filename derived from the note's first line: type `Call with Smith re settlement`, hit `Ctrl-S`, and the picker suggests `YYYYMMDD_call-with-smith-re-settlement.md` — press `Enter` to accept or just type to replace it (the suggestion is pre-selected).
+
+### Search every note
+
+`Ctrl-Shift-F` (or `F8`, or `[S]` on the home screen) searches the whole notes directory, subfolders included. Every space-separated word must appear in the filename or the file's content — so `vyas settlement` finds the call note even if the filename only says `20260601_untitled.md`. Matches show the matching line next to the filename; with no query, notes are listed newest first, so it doubles as a "recent captures" browser. `Enter` opens the highlighted note; typing an unmatched name and pressing `Enter` creates it in the notes directory.
+
+### Session word goal
+
+`Ctrl-W` sets a word target counted from that moment (blank clears it). Progress appears in the status bar as `goal 340/500`, and Marko flashes a message the moment you cross the target — visible even in focus mode.
 
 The picker input also understands zoxide shortcuts and ordinary paths. Type a zoxide query — multi-word queries work, each word is a zoxide keyword — followed by a filename, all in one go:
 

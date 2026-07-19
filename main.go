@@ -58,6 +58,9 @@ type editor struct {
 	renameFrom       string
 	waitingForPaste  bool
 	untitled         bool
+	wordGoal         int  // session word target; 0 = off
+	wordGoalBase     int  // word count when the goal was set
+	wordGoalHit      bool // goal-reached flash shown once
 	picker           *picker
 	tableGrid        *tableGridPick
 	focusScope       int     // 0 paragraph, 1 section
@@ -782,9 +785,23 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 	case tcell.KeyCtrlY:
 		e.redoEdit()
 	case tcell.KeyCtrlF:
+		if ev.Modifiers()&tcell.ModShift != 0 {
+			e.openNotesSearch()
+			break
+		}
 		e.prompt = "Find: "
 		e.promptValue = e.search
 		e.promptCursor = runeLen(e.promptValue)
+	case tcell.KeyF8:
+		e.openNotesSearch()
+	case tcell.KeyCtrlW:
+		e.prompt = "Word goal (blank clears): "
+		e.promptValue = ""
+		if e.wordGoal > 0 {
+			e.promptValue = strconv.Itoa(e.wordGoal)
+		}
+		e.promptCursor = runeLen(e.promptValue)
+		e.promptSelectAll = e.promptValue != ""
 	case tcell.KeyCtrlN:
 		e.findNext()
 	case tcell.KeyCtrlP:
@@ -918,6 +935,7 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 	e.preferredX = e.x
 	if e.dirty {
 		e.lastEdit = time.Now()
+		e.checkWordGoal()
 	}
 	return false
 }
@@ -1067,7 +1085,50 @@ func (e *editor) submitPrompt() {
 		e.replaceCurrent()
 		return
 	}
+	if e.prompt == "Word goal (blank clears): " {
+		value := strings.TrimSpace(e.promptValue)
+		e.prompt, e.promptValue, e.promptCursor, e.promptSelectAll = "", "", 0, false
+		if value == "" || value == "0" {
+			e.wordGoal = 0
+			e.status = "Word goal cleared"
+			e.flashStatus()
+			return
+		}
+		goal, err := strconv.Atoi(value)
+		if err != nil || goal < 1 {
+			e.status = "Word goal must be a number"
+			e.flashStatus()
+			return
+		}
+		e.wordGoal = goal
+		e.wordGoalBase = countWords(e.lines)
+		e.wordGoalHit = false
+		e.status = fmt.Sprintf("Word goal set: %d words from here", goal)
+		e.flashStatus()
+		return
+	}
 	e.prompt, e.promptValue, e.promptCursor, e.promptSelectAll = "", "", 0, false
+}
+
+func countWords(lines []string) int {
+	words := 0
+	for _, line := range lines {
+		words += len(strings.Fields(line))
+	}
+	return words
+}
+
+// checkWordGoal flashes once when the session target is reached, so the
+// milestone shows even in focus mode where the status bar is hidden.
+func (e *editor) checkWordGoal() {
+	if e.wordGoal <= 0 || e.wordGoalHit {
+		return
+	}
+	if countWords(e.lines)-e.wordGoalBase >= e.wordGoal {
+		e.wordGoalHit = true
+		e.status = fmt.Sprintf("Word goal reached — %d words. Keep going!", e.wordGoal)
+		e.flashStatus()
+	}
 }
 
 func completeZoxidePromptValue(value string) (string, error) {
@@ -1169,6 +1230,8 @@ func (e *editor) startMenuKey(ev *tcell.EventKey) bool {
 		e.showHelp = !e.showHelp
 	case tcell.KeyF3:
 		e.activateStartMenuAction("open")
+	case tcell.KeyF8:
+		e.activateStartMenuAction("notes")
 	case tcell.KeyUp:
 		e.moveStartMenuSelection(-1)
 	case tcell.KeyDown:
@@ -1188,6 +1251,8 @@ func (e *editor) startMenuKey(ev *tcell.EventKey) bool {
 			e.activateStartMenuAction("new")
 		case "o", "r":
 			e.activateStartMenuAction("open")
+		case "s":
+			e.activateStartMenuAction("notes")
 		case "t":
 			e.activateStartMenuAction("theme")
 		case "q":
@@ -1227,15 +1292,16 @@ func (e *editor) startMenuRecents() []string {
 }
 
 func (e *editor) startMenuItems() []startMenuItem {
-	newLabel, openLabel, themeLabel, quitLabel := "[N] New document", "[O] Open / browse...", "[T] Theme: ", "[Q] Quit"
+	newLabel, openLabel, searchLabel, themeLabel, quitLabel := "[N] New document", "[O] Open / browse...", "[S] Search notes...", "[T] Theme: ", "[Q] Quit"
 	if e.startMenuCapture {
 		// Typing falls through into the note, so single-letter
 		// accelerators are off and their hints would mislead.
-		newLabel, openLabel, themeLabel, quitLabel = "New document", "Open / browse...", "Theme: ", "Quit"
+		newLabel, openLabel, searchLabel, themeLabel, quitLabel = "New document", "Open / browse...", "Search notes...", "Theme: ", "Quit"
 	}
 	items := []startMenuItem{
 		{label: newLabel, action: "new", selectable: true},
 		{label: openLabel, action: "open", selectable: true},
+		{label: searchLabel, action: "notes", selectable: true},
 	}
 	for _, section := range groupedRecentFiles(e.startMenuRecents()) {
 		if len(section.entries) == 0 {
@@ -1283,6 +1349,9 @@ func (e *editor) activateStartMenuAction(action string) bool {
 	case action == "open":
 		e.showStartMenu = false
 		e.openFilePicker()
+	case action == "notes":
+		e.showStartMenu = false
+		e.openNotesSearch()
 	case action == "theme":
 		e.cycleTheme()
 	case strings.HasPrefix(action, "open:"):
@@ -2528,6 +2597,8 @@ func (e *editor) drawHelp(w, h int) {
 		"Alt-Down/Up      Table: add / delete row",
 		"Alt-Right/Left   Table: add / delete column",
 		"Ctrl-F/N/P       Find / next / previous",
+		"Ctrl-Shift-F/F8  Search notes (names & content)",
+		"Ctrl-W           Session word goal",
 		"Ctrl-R           Replace",
 		"Ctrl-Shift-R     Rename file",
 		"Ctrl-Z/Y         Undo / redo",
@@ -3186,6 +3257,9 @@ func (e *editor) stats() string {
 		}
 	}
 	statsStr := fmt.Sprintf("%d words", words)
+	if e.wordGoal > 0 {
+		statsStr += fmt.Sprintf("  goal %d/%d", max(0, words-e.wordGoalBase), e.wordGoal)
+	}
 	if tasksTotal > 0 {
 		statsStr += fmt.Sprintf("  %d/%d tasks (%d%%)", tasksDone, tasksTotal, tasksDone*100/tasksTotal)
 	}

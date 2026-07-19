@@ -1005,6 +1005,104 @@ func TestStartMenuTypingFallsThroughToNote(t *testing.T) {
 	}
 }
 
+func TestNotesSearchMatchesNameAndContent(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"20260601_call-with-vyas.md":    "# Call with Vyas\nDiscussed the Schedule of Loss figures.",
+		"sub/20260610_smith-hearing.md": "Smith preliminary hearing.\nJudge granted the amendment.",
+		"20260615_shopping.md":          "milk\neggs",
+		"skipped.pdf":                   "not indexed",
+		".hidden.md":                    "hidden",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	items := loadNotesIndex(dir)
+	if len(items) != 3 {
+		t.Fatalf("loadNotesIndex indexed %d files, want 3", len(items))
+	}
+
+	p := &picker{mode: pickerNotes, dir: dir, items: items, input: "vyas"}
+	got := p.visibleItems()
+	if len(got) != 1 || got[0].name != "20260601_call-with-vyas.md" {
+		t.Fatalf("name search = %+v, want the vyas note", got)
+	}
+
+	p.input = "amendment"
+	got = p.visibleItems()
+	if len(got) != 1 || got[0].name != filepath.Join("sub", "20260610_smith-hearing.md") {
+		t.Fatalf("content search = %+v, want the smith note", got)
+	}
+	if want := "Judge granted the amendment."; got[0].snippet != want {
+		t.Fatalf("snippet = %q, want %q", got[0].snippet, want)
+	}
+
+	p.input = "smith amendment"
+	if got = p.visibleItems(); len(got) != 1 {
+		t.Fatalf("multi-term search matched %d notes, want 1", len(got))
+	}
+	p.input = "vyas amendment"
+	if got = p.visibleItems(); len(got) != 0 {
+		t.Fatalf("terms across different notes matched %d, want 0", len(got))
+	}
+	p.input = ""
+	if got = p.visibleItems(); len(got) != 3 {
+		t.Fatalf("empty query shows %d notes, want all 3", len(got))
+	}
+}
+
+func TestNoteSnippetUsesOriginalCase(t *testing.T) {
+	original := "First line\nThe Amendment  was   granted\nlast"
+	lowered := strings.ToLower(original)
+	if got, want := noteSnippet(original, lowered, "amendment"), "The Amendment was granted"; got != want {
+		t.Fatalf("noteSnippet = %q, want %q", got, want)
+	}
+	if got := noteSnippet(original, lowered, "missing"); got != "" {
+		t.Fatalf("noteSnippet miss = %q, want empty", got)
+	}
+}
+
+func TestWordGoalFlow(t *testing.T) {
+	e := &editor{lines: []string{"one two three"}}
+	e.key(tcell.NewEventKey(tcell.KeyCtrlW, 0, tcell.ModCtrl))
+	if e.prompt == "" {
+		t.Fatal("Ctrl-W did not open the word goal prompt")
+	}
+	e.promptValue = "10"
+	e.submitPrompt()
+	if e.wordGoal != 10 || e.wordGoalBase != 3 {
+		t.Fatalf("goal = %d base = %d, want 10 and 3", e.wordGoal, e.wordGoalBase)
+	}
+	if !strings.Contains(e.stats(), "goal 0/10") {
+		t.Fatalf("stats = %q, want goal 0/10", e.stats())
+	}
+	e.lines = []string{"one two three four five six seven eight"}
+	if !strings.Contains(e.stats(), "goal 5/10") {
+		t.Fatalf("stats = %q, want goal 5/10", e.stats())
+	}
+	e.checkWordGoal()
+	if e.wordGoalHit {
+		t.Fatal("goal marked hit before reaching target")
+	}
+	e.lines = append(e.lines, "nine ten eleven twelve thirteen")
+	e.checkWordGoal()
+	if !e.wordGoalHit || !strings.Contains(e.status, "Word goal reached") {
+		t.Fatalf("goal not celebrated: hit=%v status=%q", e.wordGoalHit, e.status)
+	}
+	// Clearing via blank input.
+	e.prompt = "Word goal (blank clears): "
+	e.promptValue = ""
+	e.submitPrompt()
+	if e.wordGoal != 0 || strings.Contains(e.stats(), "goal") {
+		t.Fatalf("goal not cleared: %d %q", e.wordGoal, e.stats())
+	}
+}
+
 func TestNotesDirEnvOverride(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "captures")
 	t.Setenv("MARKO_NOTES_DIR", dir)
