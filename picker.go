@@ -356,6 +356,11 @@ func (p *picker) visibleItems() []pickerItem {
 	if p.mode == pickerNotes {
 		return p.visibleNotes()
 	}
+	if p.mode == pickerSaveAs || p.mode == pickerRename {
+		// The input is the filename being typed, not a filter — the
+		// folder listing must stay browsable regardless of it.
+		return p.items
+	}
 	if strings.TrimSpace(p.input) == "" || strings.HasPrefix(p.input, "z ") {
 		return p.items
 	}
@@ -751,7 +756,7 @@ type pickerRow struct {
 func (e *editor) pickerRows(visible []pickerItem, width int) []pickerRow {
 	p := e.picker
 	rows := []pickerRow{}
-	showHeaders := (p.mode == pickerOpen || p.mode == pickerSaveAs) && strings.TrimSpace(p.input) == ""
+	showHeaders := p.mode == pickerSaveAs || (p.mode == pickerOpen && strings.TrimSpace(p.input) == "")
 	recentHeader := "Recent"
 	if p.mode == pickerSaveAs {
 		recentHeader = "Recent folders"

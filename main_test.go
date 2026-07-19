@@ -1134,6 +1134,25 @@ func TestSaveAsPickerTreeExpandCollapse(t *testing.T) {
 	}
 }
 
+func TestSaveAsListingIgnoresFilenameInput(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", config)
+	t.Setenv("HOME", config)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "existing.md"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	e := &editor{lines: []string{"x"}, theme: themeByName("calm")}
+	// A pre-filled suggested filename must not fuzzy-filter the browse list
+	// down to "<empty folder>".
+	e.picker = &picker{mode: pickerSaveAs, dir: dir, input: "20260719_testing-again.md", index: -1}
+	e.refreshPicker()
+	visible := e.picker.visibleItems()
+	if len(visible) != 2 || visible[0].name != ".." || visible[1].name != "existing.md" {
+		t.Fatalf("save-as listing = %#v, want .. and existing.md despite filename input", visible)
+	}
+}
+
 func TestRecentDirsRememberAndSurfaceInSaveAs(t *testing.T) {
 	config := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", config)
