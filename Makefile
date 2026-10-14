@@ -25,6 +25,9 @@ build:
 # Build and install as ~/.local/bin/marko (the name you run it as).
 install: build
 	@mkdir -p $(BINDIR)
+	@# Replace rather than overwrite: an in-place copy keeps the old inode and
+	@# macOS SIGKILLs the binary on launch (stale code-signature cache).
+	@rm -f $(BINDIR)/$(BINARY)
 	@cp $(BINARY) $(BINDIR)/$(BINARY)
 	@chmod +x $(BINDIR)/$(BINARY)
 	@echo "Installed $$ $(BINDIR)/$(BINARY)"

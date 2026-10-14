@@ -427,7 +427,7 @@ func TestRenderedBlockQuoteHidesMarker(t *testing.T) {
 	}
 	rows := e.visualRows(40)
 	e.drawVisualLine(0, 0, rows[0], false, 40)
-	if got, want := strings.TrimRight(simulationLine(screen, 0, 40), " "), "│ Important point"; got != want {
+	if got, want := strings.TrimRight(simulationLine(screen, 0, 40), " "), "▎ Important point"; got != want {
 		t.Fatalf("rendered quote = %q, want %q", got, want)
 	}
 }
@@ -541,11 +541,12 @@ func TestOrdinaryCodeFenceRendersCalmBlock(t *testing.T) {
 	for row, vr := range rows[:3] {
 		e.drawVisualLine(0, row, vr, false, 40)
 	}
-	if got := strings.TrimRight(simulationLine(screen, 0, 40), " "); got != "┌ code · go" {
-		t.Fatalf("code header = %q", got)
+	if got := strings.TrimRight(simulationLine(screen, 0, 40), " "); got != strings.Repeat("▄", 40) {
+		t.Fatalf("code top edge = %q", got)
 	}
-	if got := strings.TrimRight(simulationLine(screen, 1, 40), " "); got != `│ fmt.Println("hello")` {
-		t.Fatalf("code body = %q", got)
+	body := strings.TrimRight(simulationLine(screen, 1, 40), " ")
+	if !strings.HasPrefix(body, `▎ fmt.Println("hello")`) || !strings.HasSuffix(body, "go") {
+		t.Fatalf("code body = %q, want indented code with language label", body)
 	}
 }
 
@@ -811,8 +812,8 @@ func TestHeadingSpacingAddsBlankRows(t *testing.T) {
 	if got := strings.TrimSpace(simulationLine(screen, 1, 40)); got != "Alpha" {
 		t.Fatalf("heading row rendered as %q, want Alpha", got)
 	}
-	if got := strings.TrimRight(simulationLine(screen, 2, 40), " "); got != "" {
-		t.Fatalf("bottom heading spacer rendered as %q, want blank", got)
+	if got := strings.Trim(simulationLine(screen, 2, 40), " ─"); got != "" {
+		t.Fatalf("bottom heading spacer rendered as %q, want blank or H1 hairline", got)
 	}
 }
 
@@ -843,7 +844,7 @@ func TestModifiedRuneDoesNotReplaceSelection(t *testing.T) {
 			selecting: true,
 		}
 		before := append([]string(nil), e.lines...)
-		e.key(tcell.NewEventKey(tcell.KeyRune, 'c', mod))
+		e.key(tcell.NewEventKey(tcell.KeyRune, 'q', mod))
 		if !reflect.DeepEqual(e.lines, before) {
 			t.Fatalf("modified rune with mod %v mutated lines: %#v, want %#v", mod, e.lines, before)
 		}
@@ -1900,17 +1901,17 @@ func TestCtrlHHighlightKeybind(t *testing.T) {
 	}
 }
 
-func TestCtrlEItalicKeybindAndRecentOnShift(t *testing.T) {
-	// Plain Ctrl-E toggles italic.
+func TestCmdIItalicKeybindAndRecentOnCtrlShiftE(t *testing.T) {
+	// Cmd-I toggles italic; plain Ctrl-E is now readline line end.
 	e := &editor{
 		lines: []string{"plain"},
 		x:     5, y: 0,
 		selX: 0, selY: 0,
 		selecting: true,
 	}
-	e.key(tcell.NewEventKey(tcell.KeyCtrlE, 0, tcell.ModCtrl))
+	e.key(tcell.NewEventKey(tcell.KeyRune, 'i', tcell.ModMeta))
 	if got, want := e.lines[0], "*plain*"; got != want {
-		t.Fatalf("Ctrl-E italic: line = %q, want %q", got, want)
+		t.Fatalf("Cmd-I italic: line = %q, want %q", got, want)
 	}
 	// Ctrl-Shift-E opens the file picker rather than toggling italic.
 	e2 := &editor{lines: []string{"plain"}}
@@ -1923,16 +1924,16 @@ func TestCtrlEItalicKeybindAndRecentOnShift(t *testing.T) {
 	}
 }
 
-func TestCtrlUUnderlineKeybind(t *testing.T) {
+func TestCmdUUnderlineKeybind(t *testing.T) {
 	e := &editor{
 		lines: []string{"plain"},
 		x:     5, y: 0,
 		selX: 0, selY: 0,
 		selecting: true,
 	}
-	e.key(tcell.NewEventKey(tcell.KeyCtrlU, 0, tcell.ModCtrl))
+	e.key(tcell.NewEventKey(tcell.KeyRune, 'u', tcell.ModMeta))
 	if got, want := e.lines[0], "<u>plain</u>"; got != want {
-		t.Fatalf("Ctrl-U: line = %q, want %q", got, want)
+		t.Fatalf("Cmd-U: line = %q, want %q", got, want)
 	}
 }
 
@@ -1967,9 +1968,9 @@ func TestF7InsertsHeadingThreeOnBlankLine(t *testing.T) {
 	}
 }
 
-func TestCtrlASelectAll(t *testing.T) {
+func TestCmdASelectAll(t *testing.T) {
 	e := &editor{lines: []string{"one", "two", "three"}, x: 1, y: 1}
-	e.key(tcell.NewEventKey(tcell.KeyCtrlA, 0, tcell.ModCtrl))
+	e.key(tcell.NewEventKey(tcell.KeyRune, 'a', tcell.ModMeta))
 	if !e.selecting {
 		t.Fatal("Ctrl-A did not enable selection")
 	}
@@ -2022,7 +2023,7 @@ func TestHelpRendersAlignedShortcutColumns(t *testing.T) {
 		rendered.WriteByte('\n')
 	}
 	text := rendered.String()
-	for _, want := range []string{"F2", "Save As", "F3", "Open / recent files", "F5", "Heading 1", "Ctrl-Shift-S", "Select all"} {
+	for _, want := range []string{"F2", "Save As", "F3", "Open / recent files", "F5", "Heading 1", "Ctrl-Shift-R", "Select all", "⌘C", "Line start / end"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("help did not render %q:\n%s", want, text)
 		}
@@ -2556,7 +2557,7 @@ func TestStartMenuCanShowHelpOverlay(t *testing.T) {
 		rendered.WriteByte('\n')
 	}
 	text := rendered.String()
-	if !strings.Contains(text, "Marko help") {
+	if !strings.Contains(text, "Marko shortcuts") {
 		t.Fatalf("start menu help overlay missing:\n%s", text)
 	}
 }

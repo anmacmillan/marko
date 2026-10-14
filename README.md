@@ -22,7 +22,8 @@ Terminal Markdown tools often force a compromise: a raw plain-text editor, a sep
 - **True Focus Mode**: Highlight the current active paragraph, table, list item, or code block while smoothly dimming the surrounding context with theme-aware Goyo/Limelight-style backgrounds.
 - **Auto-Sync & Live Reload**: Perfect for hybrid workflows. Marko automatically detects external file changes (like edits made by AI tools or external scripts) and live-reloads your document instantly while preserving your precise scroll position and cursor location.
 - **Natural Visual Navigation**: Arrow keys navigate visually on wrapped prose lines rather than physical source lines, matching the intuitive feel of GUI editors.
-- **Rich Terminal Integration**: Full support for trackpad/mouse-wheel scrolling, double-click word selection, triple-click line selection, cross-platform clipboard syncing (`Ctrl-C`/`Ctrl-V`), and bracketed paste protection.
+- **Rich Terminal Integration**: Full support for trackpad/mouse-wheel scrolling, double-click word selection, triple-click line selection, shift-click to extend, drag-to-edge auto-scroll, cross-platform clipboard syncing (`⌘C`/`⌘X`/`⌘V` or `Ctrl-C`/`Ctrl-X`/`Ctrl-V`), and bracketed paste protection.
+- **Mac keys and readline keys together**: `⌘` carries the Mac editing commands (copy, cut, paste, undo, select all, bold, italic, underline); `Ctrl-A` / `Ctrl-E` / `Ctrl-U` do readline line start, line end and delete-to-start; `⌥←` / `⌥→` / `⌥⌫` work by word. See [Ghostty setup](#ghostty--supacode-setup).
 
 ## Quick Start
 
@@ -39,6 +40,7 @@ Documents autosave after two idle seconds. Press `F1` inside Marko for the compl
 - **Aligned Tables**: Markdown tables instantly format into clean, boxed unicode tables. `Ctrl-T` opens a Word-style grid picker to insert a table of any size; pressing `Tab` moves through cells, `Enter` inserts new rows, and stepping out preserves the formatting. Inside a table, `Alt`-arrows add or delete rows and columns, and `Ctrl-T` cycles the current column's alignment (`:---` / `:---:` / `---:`) — the alignment is respected in both the raw source and the rendered view.
 - **Fenced Code Blocks**: Raw code blocks fold into visually distinct boxes with calm language labels. Stepping inside reveals the code, and stepping out hides the syntax.
 - **Emphasis & Headers**: Headers are styled and clean, and bold, italic, underline, highlight, or strikethrough markdown markers disappear inline unless you are actively editing that line. Toggle inline formatting WYSIWYG-style with `Ctrl-B` (bold), `Ctrl-E` (italic), `Ctrl-U` (underline), and `Ctrl-H` (highlight); use `F5`, `F6`, and `F7` to toggle H1, H2, and H3 on the current line. H1 and H2 also get extra vertical breathing room to fake scale inside the terminal.
+- **Lists, Quotes and Code, Drawn**: away from the cursor, bullets render as `•` / `◦` / `▪` by depth, tasks as `☐` / `☑` (done items dimmed and struck through), block quotes as italic with a `▎` bar that continues down wrapped lines, and fenced code as a filled panel with its language label. H1 gets a hairline rule beneath it, and the checklist meter appears once, on the heading directly above the tasks.
 - **Interactive Checkboxes**: Toggle lists and markdown checkboxes `[ ]` / `[x]` instantly using `Ctrl-Space`.
 
 ### 🎯 Intelligent Focus Mode
@@ -62,20 +64,25 @@ Marko works perfectly alongside external automations, scripts, or AI assistants.
 | `F1` | Show shortcut help |
 | `Ctrl-S` / `F2` / `Ctrl-Shift-S` | Save / Save As (first save of an untitled doc always asks for a name; save status flashes in focus mode) |
 | `F4` | Open the Marko home screen |
-| `Ctrl-B` | Bold (`**…**`) — wrap/unwrap selection, or insert empty markers |
-| `Ctrl-E` | Italic (`*…*`) — wrap/unwrap selection, or insert empty markers |
-| `Ctrl-U` | Underline (`<u>…</u>`) — wrap/unwrap selection, or insert empty markers |
+| `⌘B` / `Ctrl-B` | Bold (`**…**`) — wrap/unwrap selection, or insert empty markers |
+| `⌘I` | Italic (`*…*`) — wrap/unwrap selection, or insert empty markers |
+| `⌘U` | Underline (`<u>…</u>`) — wrap/unwrap selection, or insert empty markers |
 | `Ctrl-H` | Highlight (`==…==`, theme-colored) — wrap/unwrap selection, or insert empty markers |
 | `F5` / `F6` / `F7` | Toggle H1 / H2 / H3 on the current line |
-| `Ctrl-A` | Select all |
+| `⌘A` / `Ctrl-Shift-A` | Select all |
+| `Ctrl-A` / `Ctrl-E` | Line start / end (`⌘←` / `⌘→` in Ghostty) |
+| `Ctrl-U` | Delete to line start (`⌘⌫` in Ghostty) |
+| `⌥←` / `⌥→` / `⌥⌫` | Word left / right / delete word back |
+| `Shift-Home` / `Shift-End` | Extend selection to line edges |
+| `Esc` | Clear selection |
 | `F3` / `Ctrl-Shift-E` | Open the file picker (recents + browse, fuzzy filter) |
 | `Ctrl-Shift-R` | Rename the current file (stays in its own folder) |
 | `Ctrl-F` / `Ctrl-N` / `Ctrl-P` | Search / next / previous |
 | `Ctrl-Shift-F` / `F8` | Search all notes — filenames **and** content, matching line shown |
 | `Ctrl-W` | Set a session word goal (progress in the status bar, flash on reach) |
 | `Ctrl-R` | Replace current; `Ctrl-A` in prompt replaces all |
-| `Ctrl-Z` / `Ctrl-Y` | Undo / redo |
-| `Ctrl-C` / `Ctrl-X` / `Ctrl-V` | Copy / cut / paste |
+| `⌘Z` / `⌘⇧Z` / `Ctrl-Z` / `Ctrl-Y` | Undo / redo |
+| `⌘C` / `⌘X` / `⌘V` (or `Ctrl-`) | Copy / cut / paste |
 | `Ctrl-T` | Insert table (grid size picker); inside a table, cycle the current column's alignment |
 | `Alt-Down` / `Alt-Up` | Inside a table: add / delete a row |
 | `Alt-Right` / `Alt-Left` | Inside a table: add / delete a column |
@@ -177,3 +184,20 @@ If the final path is a directory, Marko uses the suggested name from the note's 
 ## Philosophy
 
 Marko is intentionally small. It focuses on rendering the Markdown structures that matter most for everyday writing while keeping your underlying text readable, portable, and standard. Features that turn it into an IDE, file manager, or proprietary notes system are outside its scope.
+
+## Ghostty / Supacode setup
+
+Marko reads Cmd as a modifier through the kitty keyboard protocol, but Ghostty (and Supacode, which embeds it and reads the same config) handles a few Cmd shortcuts itself. Add to the Ghostty config (`~/.config/ghostty/config` or `~/Library/Application Support/com.mitchellh.ghostty/config`):
+
+```
+# Cmd-C copies a terminal selection if there is one, otherwise reaches the app.
+keybind = performable:super+c=copy_to_clipboard
+# Let Cmd-A / Cmd-Z / Cmd-Shift-Z reach the app (Cmd-Shift-T still reopens a closed tab).
+keybind = super+a=unbind
+keybind = super+z=unbind
+keybind = super+shift+z=unbind
+# Shift-click extends Marko's selection instead of starting a terminal one.
+mouse-shift-capture = true
+```
+
+`⌘V` needs nothing: Ghostty pastes as a bracketed paste. `⌘←` / `⌘→` / `⌘⌫` arrive as `Ctrl-A` / `Ctrl-E` / `Ctrl-U`, which Marko treats as line start, line end and delete-to-start.

@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -37,6 +38,8 @@ type editor struct {
 	selecting        bool
 	selX, selY       int
 	mouseDown        bool
+	dragEdge         atomic.Int32 // -1/+1 while a drag is held at the top/bottom edge
+	dragX            int
 	lastClick        time.Time
 	clickX           int
 	clickY           int
@@ -75,6 +78,9 @@ type snapshot struct {
 type visualRow struct {
 	y, start int
 	text     string
+	kind     rowKind
+	lead     string // decoration drawn before text; not part of the source
+	label    string // right-aligned annotation (code block language)
 }
 
 type zopaChart struct {
@@ -150,7 +156,8 @@ func newEditor(path string, untitled bool) (*editor, error) {
 	disableTTYFlowControl()
 	s.EnableMouse()
 	s.EnablePaste()
-	status := "F1 shortcuts · F5/F6/F7 headings · Ctrl-A select all · Ctrl-C copy · Ctrl-S save"
+	s.SetCursorStyle(tcell.CursorStyleBlinkingBar) // writing-app caret; tcell restores on exit
+	status := "F1 shortcuts · F5/F6/F7 headings · ⌘A select all · ⌘C copy · ⌘S save"
 	themeName := selectedThemeName()
 	now := time.Now()
 	e := &editor{screen: s, path: path, untitled: untitled, lines: lines, status: status, themeName: themeName, theme: themeByName(themeName), lastAction: now, focusMode: true, modTime: modTime, showCoach: true, coachUntil: now.Add(3 * time.Second), showStartMenu: untitled, startMenuCapture: untitled}
@@ -465,6 +472,15 @@ func (e *editor) rememberRecent(path string) {
 func (e *editor) run() {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
+	dragTicker := time.NewTicker(50 * time.Millisecond)
+	defer dragTicker.Stop()
+	go func() {
+		for range dragTicker.C {
+			if e.dragEdge.Load() != 0 {
+				e.screen.PostEvent(tcell.NewEventInterrupt(dragTick{}))
+			}
+		}
+	}()
 	go func() {
 		for range ticker.C {
 			if e.showStartMenu {
@@ -479,7 +495,11 @@ func (e *editor) run() {
 		case *tcell.EventResize:
 			e.screen.Sync()
 		case *tcell.EventInterrupt:
-			e.tick()
+			if _, ok := ev.Data().(dragTick); ok {
+				e.dragScroll()
+			} else {
+				e.tick()
+			}
 		case *tcell.EventKey:
 			e.lastAction, e.manualScroll = time.Now(), false
 			if e.key(ev) {
@@ -584,7 +604,23 @@ func (e *editor) mouse(ev *tcell.EventMouse) {
 	y := rows[index].y
 	x = e.sourceColumnForMouse(rows[index], x-left)
 	if buttons&tcell.Button1 != 0 {
+		if sy <= 0 {
+			e.dragEdge.Store(-1)
+		} else if sy >= bodyH-1 {
+			e.dragEdge.Store(1)
+		} else {
+			e.dragEdge.Store(0)
+		}
+		e.dragX, _ = ev.Position()
+		if !e.mouseDown && ev.Modifiers()&tcell.ModShift != 0 {
+			// Shift-click extends the selection from the cursor.
+			if !e.selecting {
+				e.selX, e.selY = e.x, e.y
+			}
+			e.mouseDown = true
+		}
 		if !e.mouseDown {
+			e.dragEdge.Store(0)
 			if time.Since(e.lastClick) < 400*time.Millisecond && e.clickX == x && e.clickY == y {
 				e.clickCount++
 			} else {
@@ -609,11 +645,15 @@ func (e *editor) mouse(ev *tcell.EventMouse) {
 		e.selecting = e.selX != e.x || e.selY != e.y
 	} else {
 		e.mouseDown = false
+		e.dragEdge.Store(0)
 	}
 }
 
 func (e *editor) sourceColumnForMouse(vr visualRow, displayColumn int) int {
-	displayColumn = max(0, displayColumn)
+	if vr.kind == rowCodeTop || vr.kind == rowCodeBottom {
+		return 0
+	}
+	displayColumn = max(0, displayColumn-runeLen(vr.lead))
 	line := e.lines[vr.y]
 	return sourceColumnForRenderedColumn(line, vr.start, displayColumn)
 }
@@ -782,6 +822,10 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 			return false
 		}
 	}
+	if e.cmdKey(ev) {
+		e.finishKey()
+		return false
+	}
 	switch eventKey(ev) {
 	case tcell.KeyCtrlQ:
 		if e.dirty && !e.confirmQuit {
@@ -816,23 +860,32 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		e.checkpoint()
 		e.deleteLine()
 	case tcell.KeyCtrlE:
+		// Readline line end. Ghostty also sends this for Cmd-Right.
 		if ev.Modifiers()&tcell.ModShift != 0 {
 			e.openFilePicker()
 		} else {
-			e.checkpoint()
-			e.toggleEmphasis("*", "*")
+			e.beginKeyboardSelection(tcell.ModNone)
+			e.moveLineEdge(true)
 		}
 	case tcell.KeyCtrlB:
 		e.checkpoint()
 		e.toggleEmphasis("**", "**")
 	case tcell.KeyCtrlU:
+		// Readline delete to line start. Ghostty also sends this for Cmd-Backspace.
 		e.checkpoint()
-		e.toggleEmphasis("<u>", "</u>")
+		e.deleteToLineStart()
 	case tcell.KeyCtrlH:
 		e.checkpoint()
 		e.toggleEmphasis("==", "==")
 	case tcell.KeyCtrlA:
-		e.selectAll()
+		// Readline line start (Ghostty sends this for Cmd-Left); Ctrl-Shift-A
+		// selects all where Cmd-A does not reach Marko.
+		if ev.Modifiers()&tcell.ModShift != 0 {
+			e.selectAll()
+		} else {
+			e.beginKeyboardSelection(tcell.ModNone)
+			e.moveLineEdge(false)
+		}
 	case tcell.KeyCtrlZ:
 		e.undoEdit()
 	case tcell.KeyCtrlY:
@@ -924,7 +977,9 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 			break
 		}
 		e.beginKeyboardSelection(ev.Modifiers())
-		if e.x > 0 {
+		if ev.Modifiers()&tcell.ModAlt != 0 {
+			e.moveWord(-1)
+		} else if e.x > 0 {
 			e.x--
 		} else if e.y > 0 {
 			e.y--
@@ -937,24 +992,38 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 			break
 		}
 		e.beginKeyboardSelection(ev.Modifiers())
-		if e.x < runeLen(e.lines[e.y]) {
+		if ev.Modifiers()&tcell.ModAlt != 0 {
+			e.moveWord(1)
+		} else if e.x < runeLen(e.lines[e.y]) {
 			e.x++
 		} else if e.y+1 < len(e.lines) {
 			e.y++
 			e.x = 0
 		}
-	case tcell.KeyHome:
-		e.moveLineEdge(false)
-	case tcell.KeyEnd:
-		e.moveLineEdge(true)
+	case tcell.KeyHome, tcell.KeyEnd:
+		e.beginKeyboardSelection(ev.Modifiers())
+		if ev.Modifiers()&tcell.ModCtrl != 0 {
+			e.moveDocEdge(eventKey(ev) == tcell.KeyEnd)
+		} else {
+			e.moveLineEdge(eventKey(ev) == tcell.KeyEnd)
+		}
 	case tcell.KeyPgUp:
+		e.beginKeyboardSelection(ev.Modifiers())
 		e.movePageVisual(-1)
 	case tcell.KeyPgDn:
+		e.beginKeyboardSelection(ev.Modifiers())
 		e.movePageVisual(1)
+	case tcell.KeyEsc:
+		if e.selecting {
+			e.selecting = false
+			e.status = "Selection cleared"
+		}
 	case tcell.KeyBackspace, tcell.KeyBackspace2:
 		e.checkpoint()
 		if e.selecting {
 			e.deleteSelection()
+		} else if ev.Modifiers()&tcell.ModAlt != 0 {
+			e.deleteWordBack()
 		} else {
 			e.backspace()
 		}
@@ -974,6 +1043,16 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 			e.insert("    ")
 		}
 	case tcell.KeyRune:
+		// Ghostty sends Option-Left/Right as readline Esc-b / Esc-f.
+		if ev.Modifiers() == tcell.ModAlt && (ev.Rune() == 'b' || ev.Rune() == 'f') {
+			e.selecting = false
+			if ev.Rune() == 'b' {
+				e.moveWord(-1)
+			} else {
+				e.moveWord(1)
+			}
+			break
+		}
 		if !textInputModifiers(ev.Modifiers()) {
 			e.status = "Ignored modified key"
 			break
@@ -984,13 +1063,17 @@ func (e *editor) key(ev *tcell.EventKey) bool {
 		}
 		e.insert(string(ev.Rune()))
 	}
+	e.finishKey()
+	return false
+}
+
+func (e *editor) finishKey() {
 	e.confirmQuit = false
 	e.preferredX = e.x
 	if e.dirty {
 		e.lastEdit = time.Now()
 		e.checkWordGoal()
 	}
-	return false
 }
 
 func (e *editor) openFile(path string) {
@@ -2283,7 +2366,7 @@ func (e *editor) save() {
 		e.modTime = info.ModTime()
 	}
 	e.conflict = false
-	e.status = "Saved " + shortenHomePath(e.path)
+	e.status = "Saved " + filepath.Base(e.path)
 	e.rememberRecent(e.path)
 	rememberRecentDir(absDir(filepath.Dir(e.path)))
 	_ = os.Remove(journalPath(e.path))
@@ -2364,7 +2447,7 @@ func (e *editor) autosave() {
 			_ = os.WriteFile(journal, []byte(strings.Join(e.lines, "\n")), 0600)
 		}
 		e.save()
-		e.status = "Autosaved " + shortenHomePath(e.path)
+		e.status = "Autosaved " + filepath.Base(e.path)
 	}
 }
 
@@ -2386,6 +2469,10 @@ func (e *editor) draw() {
 	bodyH := max(1, h-statusRows)
 	left, contentWidth := writingArea(w)
 	background := tcell.StyleDefault.Background(e.theme.background)
+	if e.focusMode && e.theme.dimBG.Valid() {
+		// Dim the whole page evenly, not just the cells under dimmed text.
+		background = background.Background(e.theme.dimBG)
+	}
 	for row := 0; row < bodyH; row++ {
 		e.put(0, row, strings.Repeat(" ", w), background, w)
 	}
@@ -2418,11 +2505,23 @@ func (e *editor) draw() {
 		if vr.start < 0 {
 			style := e.focusStyle(tcell.StyleDefault.Background(e.theme.background), e.focusedLine(vr.y))
 			e.put(left, row, strings.Repeat(" ", contentWidth), style, left+contentWidth)
+			if i := e.top + row; i > 0 && rows[i-1].y == vr.y && rows[i-1].start >= 0 {
+				if level, _, ok := heading(e.lines[vr.y]); ok && level == 1 {
+					// Hairline under H1: the terminal cannot enlarge type, so give it a rule.
+					rule := tcell.StyleDefault.Background(e.theme.background).Foreground(blendColor(e.theme.heading1, e.theme.background, 0.6))
+					e.put(left, row, strings.Repeat("─", contentWidth), e.focusStyle(rule, e.focusedLine(vr.y)), left+contentWidth)
+				}
+			}
 			continue
 		}
+		rowBG := e.focusStyle(tcell.StyleDefault.Background(e.theme.background), e.focusedLine(vr.y))
+		e.put(left, row, strings.Repeat(" ", contentWidth), rowBG, left+contentWidth)
 		e.drawVisualLine(left, row, vr, e.focusedLine(vr.y), contentWidth)
 	}
 	e.dimStrength = 0
+	if e.focusMode && e.prompt == "" && e.statusUntil.IsZero() {
+		e.drawWhisperStatus(w, bodyH)
+	}
 	name := filepath.Base(e.path)
 	if e.path == "" {
 		name = "Untitled"
@@ -2630,48 +2729,94 @@ func dimStrengthFor(y, start, end int) float64 {
 }
 
 func (e *editor) drawHelp(w, h int) {
-	lines := []string{
-		" Marko help ",
-		"Key              Action",
-		"F1               Close help",
-		"Ctrl-S           Save",
-		"F2 / Ctrl-Shift-S Save As",
-		"F3 / Ctrl-Shift-E Open / recent files",
-		"F4               Home screen",
-		"Ctrl-Q           Quit",
-		"Ctrl-A           Select all",
-		"Shift-arrows     Select text",
-		"Drag             Select text",
-		"Ctrl-C/X/V       Copy / cut / paste",
-		"Ctrl-B/E/U/H     Bold / italic / underline / highlight",
-		"F5 / F6 / F7     Heading 1 / 2 / 3",
-		"Ctrl-Space       Toggle checkbox",
-		"Ctrl-O           Link selection",
-		"Ctrl-T           Insert table / cycle column alignment",
-		"Alt-Down/Up      Table: add / delete row",
-		"Alt-Right/Left   Table: add / delete column",
-		"Ctrl-F/N/P       Find / next / previous",
-		"Ctrl-Shift-F/F8  Search notes (names & content)",
-		"Ctrl-W           Session word goal",
-		"Ctrl-R           Replace",
-		"Ctrl-Shift-R     Rename file",
-		"Ctrl-Z/Y         Undo / redo",
-		"Ctrl-K           Focus mode",
-		"Ctrl-Shift-K     Focus scope (paragraph/section)",
-		"Ctrl-G           Cycle theme",
-		"Picker           Type to filter, z query + Tab jumps",
+	type entry struct{ keys, action string }
+	group := func(title string, entries ...entry) []entry {
+		return append([]entry{{"", title}}, entries...)
 	}
-	width := 0
-	for _, line := range lines {
-		width = max(width, runeLen(line))
+	left := append(append(
+		group("MOVE & SELECT",
+			entry{"Ctrl-A  Ctrl-E", "Line start / end"},
+			entry{"⌥←  ⌥→", "Word left / right"},
+			entry{"⌘↑  ⌘↓", "Document start / end"},
+			entry{"⇧ + any move", "Extend selection"},
+			entry{"Drag  ⇧-click", "Select with the mouse"},
+			entry{"⌘A", "Select all"},
+			entry{"Esc", "Clear selection"}),
+		group("EDIT",
+			entry{"⌘C  ⌘X  ⌘V", "Copy / cut / paste"},
+			entry{"⌘Z  ⌘⇧Z", "Undo / redo"},
+			entry{"Ctrl-U  ⌥⌫", "Delete to line start / word"})...),
+		group("FILE",
+			entry{"⌘S  F2", "Save / Save As"},
+			entry{"F3  F4", "Open / recent files, home"},
+			entry{"Ctrl-Shift-R", "Rename"},
+			entry{"Ctrl-Q", "Quit"})...)
+	right := append(
+		group("FORMAT",
+			entry{"⌘B  ⌘I  ⌘U", "Bold / italic / underline"},
+			entry{"Ctrl-H", "Highlight"},
+			entry{"F5  F6  F7", "Heading 1 / 2 / 3"},
+			entry{"Ctrl-Space", "Toggle checkbox"},
+			entry{"Ctrl-O", "Link selection"},
+			entry{"Ctrl-T", "Table / column alignment"},
+			entry{"⌥ + arrows", "Table rows and columns"}),
+		group("FIND & VIEW",
+			entry{"Ctrl-F  N  P", "Find / next / previous"},
+			entry{"Ctrl-R", "Replace"},
+			entry{"F8", "Search all notes"},
+			entry{"Ctrl-K  ⇧", "Focus mode / focus scope"},
+			entry{"Ctrl-W", "Word goal"},
+			entry{"Ctrl-G", "Theme"},
+			entry{"F1", "Close help"})...)
+
+	const keyWidth, colWidth, gap = 15, 42, 4
+	columns := [][]entry{left, right}
+	if w < 2*colWidth+gap+6 {
+		columns = [][]entry{append(left, right...)}
 	}
-	x, y := max(0, (w-width-4)/2), max(0, (h-len(lines)-2)/2)
-	box := tcell.StyleDefault.Background(e.theme.statusBG).Foreground(e.theme.statusFG)
-	for row := 0; row < len(lines)+2 && y+row < h; row++ {
-		e.put(x, y+row, strings.Repeat(" ", min(w-x, width+4)), box, w)
+	rows := 0
+	for _, col := range columns {
+		rows = max(rows, len(col))
 	}
-	for row, line := range lines {
-		e.put(x+2, y+1+row, line, box, w)
+	boxW := len(columns)*colWidth + (len(columns)-1)*gap + 6
+	pad := 0
+	if h >= rows+4 {
+		pad = 1
+	}
+	boxH := rows + 2 + 2*pad
+	x0, y0 := max(0, (w-boxW)/2), max(0, (h-boxH)/2)
+
+	panelBG := blendColor(e.theme.statusBG, e.theme.background, 0.35)
+	panel := tcell.StyleDefault.Background(panelBG).Foreground(e.theme.statusFG)
+	border := panel.Foreground(blendColor(e.theme.statusFG, panelBG, 0.55))
+	keyStyle := panel.Foreground(e.theme.accent1).Bold(true)
+	header := panel.Foreground(blendColor(e.theme.statusFG, panelBG, 0.4)).Bold(true)
+
+	for row := 0; row < boxH && y0+row < h; row++ {
+		line := "│" + strings.Repeat(" ", boxW-2) + "│"
+		switch row {
+		case 0:
+			line = "╭" + strings.Repeat("─", boxW-2) + "╮"
+		case boxH - 1:
+			line = "╰" + strings.Repeat("─", boxW-2) + "╯"
+		}
+		e.put(x0, y0+row, line, border, w)
+	}
+	e.put(x0+3, y0, " Marko shortcuts ", header, w)
+	for c, col := range columns {
+		cx := x0 + 3 + c*(colWidth+gap)
+		for r, en := range col {
+			y := y0 + 1 + pad + r
+			if y >= h {
+				break
+			}
+			if en.keys == "" {
+				e.put(cx, y, en.action, header, w)
+				continue
+			}
+			e.put(cx, y, en.keys, keyStyle, w)
+			e.put(cx+keyWidth, y, en.action, panel, w)
+		}
 	}
 }
 
@@ -2924,12 +3069,23 @@ func (e *editor) visualRows(width int) []visualRow {
 			y = end
 			continue
 		}
-		if language, end, ok := e.codeFence(y); ok && (e.y < y || e.y > end) {
-			rows = append(rows, visualRow{y: y, text: "┌ code · " + language})
-			for lineY := y + 1; lineY < end; lineY++ {
-				rows = append(rows, visualRow{y: lineY, text: "│ " + e.lines[lineY]})
+		if language, end, ok := e.codeFence(y); ok {
+			if e.y >= y && e.y <= end {
+				// Editing inside the block: raw source, never list/quote decoration.
+				for lineY := y; lineY <= end; lineY++ {
+					rows = appendWrappedRows(rows, visualRow{y: lineY}, e.lines[lineY], 0, width)
+				}
+			} else {
+				rows = append(rows, visualRow{y: y, kind: rowCodeTop})
+				for lineY := y + 1; lineY < end; lineY++ {
+					vr := visualRow{y: lineY, text: e.lines[lineY], kind: rowCode, lead: "  "}
+					if lineY == y+1 {
+						vr.label = language
+					}
+					rows = append(rows, vr)
+				}
+				rows = append(rows, visualRow{y: end, kind: rowCodeBottom})
 			}
-			rows = append(rows, visualRow{y: end, text: "└"})
 			y = end
 			continue
 		}
@@ -2944,28 +3100,11 @@ func (e *editor) visualRows(width int) []visualRow {
 
 func (e *editor) appendVisualLineRows(rows []visualRow, y int, line string, width int) []visualRow {
 	if y != e.y {
-		if quote, ok := blockQuote(line); ok {
-			line = "│ " + quote
+		if kind, lead, skip, ok := lineDecoration(line); ok {
+			return appendWrappedRows(rows, visualRow{y: y, kind: kind, lead: lead}, line, skip, width)
 		}
 	}
-	runes := []rune(line)
-	if len(runes) == 0 {
-		return append(rows, visualRow{y: y})
-	}
-	for start := 0; start < len(runes); {
-		end := min(len(runes), start+width)
-		if end < len(runes) {
-			for candidate := end; candidate > start+width/2; candidate-- {
-				if runes[candidate-1] == ' ' {
-					end = candidate
-					break
-				}
-			}
-		}
-		rows = append(rows, visualRow{y: y, start: start, text: string(runes[start:end])})
-		start = end
-	}
-	return rows
+	return appendWrappedRows(rows, visualRow{y: y}, line, 0, width)
 }
 
 func headingSpacing(level int) (int, int) {
@@ -3269,7 +3408,9 @@ func renderRule(width int) string {
 func (e *editor) sectionChecklistProgress(y int, level int) (string, bool) {
 	checked, total := 0, 0
 	for lineY := y + 1; lineY < len(e.lines); lineY++ {
-		if l, _, ok := heading(e.lines[lineY]); ok && l <= level {
+		if _, _, ok := heading(e.lines[lineY]); ok {
+			// Count only the tasks directly under this heading, so a list
+			// shows its meter once rather than on every ancestor heading.
 			break
 		}
 		trimmed := strings.TrimSpace(e.lines[lineY])
@@ -3289,12 +3430,12 @@ func (e *editor) sectionChecklistProgress(y int, level int) (string, bool) {
 	bar := make([]rune, barWidth)
 	for i := 0; i < barWidth; i++ {
 		if i < filled {
-			bar[i] = '■'
+			bar[i] = '━'
 		} else {
-			bar[i] = '□'
+			bar[i] = '─'
 		}
 	}
-	return fmt.Sprintf("[%s] %d%% (%d/%d)", string(bar), percent, checked, total), true
+	return fmt.Sprintf("%s %d/%d", string(bar), checked, total), true
 }
 
 func (e *editor) stats() string {
@@ -3332,38 +3473,66 @@ func (e *editor) cursorVisualRow(rows []visualRow) int {
 	return 0
 }
 
-func (e *editor) putCodeLine(left, row int, vr visualRow, style tcell.Style, maxWidth int) {
-	runes := []rune(vr.text)
-	isFence := strings.HasPrefix(vr.text, "┌") || strings.HasPrefix(vr.text, "└")
-	for i := 0; i < len(runes); i++ {
-		if left+i >= maxWidth {
+func (e *editor) putCodeLine(left, row int, vr visualRow, style, page tcell.Style, width int) {
+	_, codeBG, _ := style.Decompose()
+	_, pageBG, _ := page.Decompose()
+	maxWidth := left + width
+	switch vr.kind {
+	case rowCodeTop, rowCodeBottom:
+		// Half blocks give the panel a soft half-row of padding top and bottom.
+		edge := tcell.StyleDefault.Foreground(codeBG).Background(pageBG)
+		if e.positionSelected(0, vr.y) {
+			edge = e.selectedStyle(page)
+		}
+		glyph := "▄"
+		if vr.kind == rowCodeBottom {
+			glyph = "▀"
+		}
+		e.put(left, row, strings.Repeat(glyph, width), edge, maxWidth)
+		return
+	}
+	e.put(left, row, strings.Repeat(" ", width), style, maxWidth)
+	if vr.label != "" {
+		fg, _, _ := style.Decompose()
+		labelStyle := style.Foreground(blendColor(fg, codeBG, 0.55)).Italic(true)
+		if x := maxWidth - runeLen(vr.label) - 1; x > left+runeLen(vr.lead)+runeLen(vr.text)+2 {
+			e.put(x, row, vr.label, labelStyle, maxWidth)
+		}
+	}
+	if vr.kind == rowCode {
+		bar := style.Foreground(e.dimmedFG(e.theme.accent1, vr.y))
+		e.put(left, row, "▎", bar, maxWidth)
+	}
+	x := left + runeLen(vr.lead)
+	for i, r := range []rune(vr.text) {
+		if x >= maxWidth {
 			break
 		}
 		s := style
-		if !isFence {
-			srcX := i - 2
-			if srcX < 0 {
-				srcX = 0
-			}
-			if e.positionSelected(srcX, vr.y) {
-				s = e.selectedStyle(s)
-			} else if e.positionMatchesSearch(srcX, vr.y) {
-				s = e.searchStyle(s)
-			}
-		} else {
-			if e.positionSelected(0, vr.y) {
-				s = e.selectedStyle(s)
-			}
+		if srcX := vr.start + i; e.positionSelected(srcX, vr.y) {
+			s = e.selectedStyle(s)
+		} else if e.positionMatchesSearch(srcX, vr.y) {
+			s = e.searchStyle(s)
 		}
-		e.screen.SetContent(left+i, row, runes[i], nil, s)
+		e.screen.SetContent(x, row, r, nil, s)
+		x++
 	}
 }
 
 func (e *editor) drawVisualLine(left, row int, vr visualRow, current bool, width int) {
 	if _, _, ok := e.codeFenceBounds(vr.y); ok {
-		style := tcell.StyleDefault.Foreground(e.theme.codeFG).Background(e.theme.codeBG)
+		style := tcell.StyleDefault.Foreground(e.theme.codeFG).Background(e.codePanelBG())
 		style = e.focusStyle(style, current)
-		e.putCodeLine(left, row, vr, style, left+width)
+		if e.focusMode && !current && e.theme.dimBG.Valid() {
+			// focusStyle repaints the background with dimBG; keep the panel visible, just receded.
+			style = style.Background(blendColor(e.codePanelBG(), e.theme.dimBG, 0.35))
+		}
+		page := e.focusStyle(tcell.StyleDefault.Background(e.theme.background), current)
+		e.putCodeLine(left, row, vr, style, page, width)
+		return
+	}
+	if vr.kind != rowPlain {
+		e.drawDecoratedRow(left, row, vr, current, width)
 		return
 	}
 	if start, end, ok := e.zopaFenceBounds(vr.y); ok && (e.y < start || e.y > end) {
@@ -3506,20 +3675,21 @@ func (e *editor) drawLine(left, row, y int, line string, current bool, width int
 		}
 	}
 	if level, text, ok := heading(line); ok {
-		line = text
+		colour := e.theme.heading3
+		switch level {
+		case 1:
+			colour = e.theme.heading1
+		case 2:
+			colour = e.theme.heading2
+		}
+		style = tcell.StyleDefault.Background(e.theme.background).Foreground(colour).Bold(true)
+		style = e.focusStyle(style, current)
+		e.putInline(left, row, text, style, left+width, y, 0)
 		if progressText, hasChecklist := e.sectionChecklistProgress(y, level); hasChecklist {
-			line = line + "  " + progressText
+			muted := tcell.StyleDefault.Background(e.theme.background).Foreground(e.theme.muted)
+			e.put(left+inlineDisplayWidth(text)+3, row, progressText, e.focusStyle(muted, current), left+width)
 		}
-		if !e.focusMode {
-			switch level {
-			case 1:
-				style = style.Bold(true).Foreground(e.theme.heading1)
-			case 2:
-				style = style.Bold(true).Foreground(e.theme.heading2)
-			default:
-				style = style.Bold(true).Foreground(e.theme.heading3)
-			}
-		}
+		return
 	}
 	if !current && !e.focusMode {
 		switch {
@@ -3591,7 +3761,7 @@ func (e *editor) focusStyle(style tcell.Style, current bool) tcell.Style {
 	if fg.Valid() && target.Valid() {
 		// Recede the text toward the page rather than repainting it a flat
 		// grey: each colour keeps its hue, so headings still read as headings.
-		out := style.Foreground(blendColor(fg, target, 0.65*strength))
+		out := style.Foreground(blendColor(fg, target, 0.5*strength))
 		if e.theme.dimBG.Valid() {
 			out = out.Background(e.theme.dimBG)
 		}
@@ -3736,14 +3906,18 @@ func (e *editor) renderTableLine(y int, maxWidths ...int) string {
 func (e *editor) drawTableLine(left, row, y, maxWidth int, style tcell.Style) {
 	widths := fitTableWidths(e.tableWidths(y), maxWidth)
 	if isSeparator(e.lines[y]) {
-		e.put(left, row, e.renderTableLine(y, maxWidth), style, left+maxWidth)
+		// A heavier rule under the header row; borders stay faint.
+		borders, _ := e.tableStyles(y, style)
+		rule := strings.NewReplacer("─", "━", "├", "┝", "┼", "┿", "┤", "┥").Replace(e.renderTableLine(y, maxWidth))
+		e.put(left, row, rule, borders, left+maxWidth)
 		return
 	}
 
 	cells := splitTable(e.lines[y])
 	aligns := e.tableAlignments(y)
+	borders, cellStyle := e.tableStyles(y, style)
 	x := left
-	e.screen.SetContent(x, row, '│', nil, style)
+	e.screen.SetContent(x, row, '│', nil, borders)
 	x++
 	for col, width := range widths {
 		e.screen.SetContent(x, row, ' ', nil, style)
@@ -3757,11 +3931,11 @@ func (e *editor) drawTableLine(left, row, y, maxWidth int, style tcell.Style) {
 			align = aligns[col]
 		}
 		e.put(x, row, strings.Repeat(" ", width), style, x+width)
-		e.putInline(x+inlinePadLeft(value, width, align), row, value, style, x+width, y, 0)
+		e.putInline(x+inlinePadLeft(value, width, align), row, value, cellStyle, x+width, y, 0)
 		x += width
 		e.screen.SetContent(x, row, ' ', nil, style)
 		x++
-		e.screen.SetContent(x, row, '│', nil, style)
+		e.screen.SetContent(x, row, '│', nil, borders)
 		x++
 	}
 }
@@ -3949,7 +4123,7 @@ func (e *editor) putInline(x, screenY int, text string, base tcell.Style, maxWid
 				}
 				rStyle := e.emphasisStyle(markerText, styled, s)
 				if e.focusMode && y != e.y {
-					rStyle = s
+					rStyle = dimmedEmphasis(markerText, styled, s)
 				}
 				rSrcX := start + i + marker + idx
 				if e.positionSelected(rSrcX, y) {
@@ -4011,7 +4185,7 @@ func (e *editor) putInlineWindow(x, screenY int, line string, base tcell.Style, 
 				s := base
 				rStyle := e.emphasisStyle(markerText, styled, s)
 				if e.focusMode && y != e.y {
-					rStyle = s
+					rStyle = dimmedEmphasis(markerText, styled, s)
 				}
 				if e.positionSelected(idx, y) {
 					rStyle = e.selectedStyle(rStyle)
